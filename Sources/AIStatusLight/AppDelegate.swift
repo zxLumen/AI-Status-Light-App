@@ -1,10 +1,15 @@
 import AppKit
 import ServiceManagement
+import Carbon.HIToolbox
+import PrivateStatusItem
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let contract = Contract.load()
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
+    private var appState: AppState!
+    private var panel: PanelController!
+    private var hotKey: HotKey?
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -13,14 +18,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var animEpoch = Date()
     private var demoStart: Date?
     private var demoUntil: Date?
+    private let debug = ProcessInfo.processInfo.environment["AISTATUS_DEBUG"] != nil
+
+    private func dbg(_ s: String) {
+        if debug { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        appState = AppState(contract: contract)
+
+        let env = ProcessInfo.processInfo.environment
+        // The private priority API turned out unreliable on macOS 15 (it can place
+        // the item off-screen left), so it is opt-in for experiments only.
+        if env["AISTATUS_PRIVATE"] != nil,
+           let item = AIStatusItemWithPriority(NSStatusItem.variableLength, Int32.min) {
+            statusItem = item
+            dbg("status item: private priority API")
+        } else {
+            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            dbg("status item: public API")
+        }
+        if env["AISTATUS_NO_AUTOSAVE"] == nil {
+            statusItem.autosaveName = "com.zxlumen.aistatus"
+        }
         statusItem.button?.image = StatusIcon.image(r: 0.1, y: 0.1, g: 0.1)
 
         menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+
+        panel = PanelController(
+            state: appState,
+            onDemo: { [weak self] in self?.startDemo() },
+            onClear: { [weak self] in self?.clearState() },
+            onOpen: { [weak self] in self?.openPanel() },
+            onQuit: { NSApp.terminate(nil) })
+        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_L),
+                        modifiers: UInt32(cmdKey | optionKey)) { [weak self] in
+            self?.panel.toggle()
+        }
+        if hotKey == nil { dbg("hot key registration failed") }
 
         poll()
         let t = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -28,6 +65,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         RunLoop.main.add(t, forMode: .common)
         pollTimer = t
+
+        if debug {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, let btn = self.statusItem.button, let scr = NSScreen.main else { return }
+                let onScreen = btn.window?.convertToScreen(btn.convert(btn.bounds, to: nil)) ?? .zero
+                let left = scr.auxiliaryTopLeftArea ?? .zero
+                let right = scr.auxiliaryTopRightArea ?? .zero
+                self.dbg("item.onScreen=\(onScreen)")
+                self.dbg("notch: leftArea=\(left) rightArea=\(right) → notch spans ~\(left.maxX)...\(right.minX)")
+                self.dbg("visible=\(self.statusItem.isVisible) hiddenByNotch=\(onScreen.maxX > left.maxX && onScreen.minX < right.minX)")
+                self.dbg("screenWidth=\(scr.frame.width)")
+            }
+        }
     }
 
     // MARK: - State
@@ -42,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func poll() {
         last = Aggregator.aggregate(StateStore.readSessions(), contract: contract)
+        appState?.update(last)
         syncAnimation()
     }
 
