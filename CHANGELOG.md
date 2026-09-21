@@ -32,6 +32,11 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 跳转在**主线程**同步执行 `code`/`sqlite3`,慢时会卡死菜单栏(可能被系统判无响应终止);
+  改为**后台线程**执行,不再阻塞 UI
+- 启动/退出写 `~/.ai-status-light/app.log`,便于区分「正常退出」与「被终止/强退」
+
+### Fixed
 - opencode `busy` 从不触发:`tool.execute.before/after` 是插件 **hook**(非 event),
   现按 hook 转发为 busy/working
 - opencode 新增 `thinking`:由 `message.part.updated` 的 reasoning 部分派生

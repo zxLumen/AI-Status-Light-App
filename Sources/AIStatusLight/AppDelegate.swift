@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        appLog("launch")
         appState = AppState(contract: contract)
 
         let env = ProcessInfo.processInfo.environment
@@ -191,9 +192,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func jump(agent: String, directory: String? = nil, sessionId: String? = nil) {
         _ = WindowFocuser.ensureTrusted()
-        if !AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId) {
-            panel.show()
+        // Resolve directory / run the VS Code CLI off the main thread so a slow
+        // `code`/`sqlite3` can never freeze the menu bar.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let ok = AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId)
+            if !ok {
+                DispatchQueue.main.async { self?.panel.show() }
+            }
         }
+    }
+
+    // MARK: - Exit diagnostics
+
+    private func appLog(_ text: String) {
+        let dir = StateStore.home
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("app.log")
+        let line = ISO8601DateFormatter().string(from: Date()) + "  pid=\(getpid())  " + text + "\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(data)
+            try? h.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appLog("terminate")
     }
 
     private func refreshIcon() {
