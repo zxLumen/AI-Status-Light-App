@@ -1,0 +1,55 @@
+{
+  "contract": "ai-status-light/states",
+  "version": 1,
+  "modes": [
+    "off", "idle", "thinking", "working", "busy", "success", "error",
+    "blocked", "alarm", "demo", "traffic", "red", "yellow", "green"
+  ],
+  "event_states": [
+    "idle", "thinking", "working", "busy", "success", "error", "blocked"
+  ],
+  "event_to_mode": {
+    "idle": "idle",
+    "thinking": "thinking",
+    "working": "working",
+    "busy": "busy",
+    "success": "success",
+    "error": "error",
+    "blocked": "blocked"
+  },
+  "priority": {
+    "blocked": 60,
+    "error": 50,
+    "success": 40,
+    "busy": 30,
+    "working": 20,
+    "thinking": 15,
+    "idle": 0
+  },
+  "default_ttl": {
+    "blocked": 300.0,
+    "error": 60.0,
+    "success": 25.0,
+    "busy": 90.0,
+    "working": 90.0,
+    "thinking": 90.0,
+    "idle": 15.0
+  },
+  "display": {
+    "off":     { "color": "#8a8f98", "label": "off" },
+    "idle":    { "color": "#8a8f98", "label": "idle" },
+    "thinking":{"color": "#f4c20d", "label": "thinking" },
+    "working": { "color": "#f4c20d", "label": "working" },
+    "busy":    { "color": "#ff8a00", "label": "busy" },
+    "success": { "color": "#1faa59", "label": "success" },
+    "error":   { "color": "#e8453c", "label": "error" },
+    "blocked": { "color": "#b06fe8", "label": "needs you" },
+    "alarm":   { "color": "#ff2d78", "label": "alarm" },
+    "demo":    { "color": "#21bfd6", "label": "demo" },
+    "traffic": { "color": "#21bfd6", "label": "traffic" },
+    "red":     { "color": "#e8453c", "label": "red" },
+    "yellow":  { "color": "#f4c20d", "label": "yellow" },
+    "green":   { "color": "#1faa59", "label": "green" }
+  },
+  "agents": ["claude", "cursor", "codex", "opencode", "manual"]
+}

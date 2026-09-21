@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-status-light"
+version = "0.1.0"
+description = "Desk status light for AI coding agents (Claude Code / Cursor / Codex / opencode)"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+serial = ["pyserial>=3.5"]
+ble = ["bleak>=0.22"]
+scrape = ["playwright>=1.40"]
+all = ["pyserial>=3.5", "bleak>=0.22"]
+
+[project.scripts]
+aistatus = "aistatus.cli:main"
+
+[tool.setuptools]
+packages = ["aistatus"]
+
+[tool.setuptools.package-data]
+aistatus = ["*.js", "states.json"]

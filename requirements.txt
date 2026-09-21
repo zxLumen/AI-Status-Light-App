@@ -1,0 +1,8 @@
+# Core host bridge has no required dependencies.
+# Optional extras:
+#   pyserial  -> USB serial transport      (pip install pyserial)
+#   bleak     -> BLE transport             (pip install bleak)
+#   playwright-> product scrapers in tools/ (pip install playwright)
+pyserial>=3.5
+bleak>=0.22
+playwright>=1.40

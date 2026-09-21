@@ -1,0 +1,10 @@
+.venv/
+.opencode/
+.build/
+build/
+__pycache__/
+*.pyc
+*.egg-info/
+debug/
+*.aistatus.bak
+.DS_Store

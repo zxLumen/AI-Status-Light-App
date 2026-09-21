@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Status Light · 配置台</title>
+<style>
+  :root { --bg:#10141a; --panel:#1a212b; --border:#26303d; --fg:#dbe4ee; --dim:#8a93a3;
+          --accent:#21bfd6; --ok:#1faa59; --err:#e8453c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .wrap { max-width:860px; margin:0 auto; padding:20px; }
+  h1 { font-size:18px; }
+  h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:22px 0 8px; }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+         background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  button { background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:8px;
+           padding:8px 12px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  select { background:var(--panel); color:var(--fg); border:1px solid var(--border);
+           border-radius:8px; padding:8px; font:inherit; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#555; display:inline-block; margin-right:6px; }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+  .mode { display:flex; align-items:center; gap:8px; }
+  .sw { width:12px; height:12px; border-radius:50%; border:1px solid var(--border); }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  input[type=range] { accent-color:var(--accent); width:130px; }
+  input[type=text] { background:#0d1117; color:var(--fg); border:1px solid var(--border);
+                     border-radius:8px; padding:8px; font:inherit; width:120px; }
+  .swatch { width:44px; height:44px; border-radius:10px; border:1px solid var(--border); }
+  #log { background:#0d1117; border:1px solid var(--border); border-radius:10px; height:180px;
+         overflow:auto; padding:10px; margin-top:8px; white-space:pre-wrap; }
+  .l { color:var(--dim); } .r { color:var(--fg); } .ok { color:var(--ok); } .er { color:var(--err); }
+  .info { color:var(--dim); margin:4px 0 0; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AI Status Light · 配置台</h1>
+
+  <div class="bar">
+    <span id="led" class="dot"></span><span id="connText">未连接</span>
+    <select id="transport" style="margin-left:auto">
+      <option value="serial">USB 串口 (Web Serial)</option>
+      <option value="ble">蓝牙 BLE (Web Bluetooth)</option>
+    </select>
+    <button id="btnConnect">连接设备</button>
+    <button id="btnHello" disabled>HELLO 查询</button>
+  </div>
+
+  <h2>运行状态</h2>
+  <div class="grid" id="gridStates"></div>
+
+  <h2>手动静态 / 演示</h2>
+  <div class="grid" id="gridStatic"></div>
+
+  <h2>自定义颜色 (COLOR R G B)</h2>
+  <div class="panel">
+    <div class="row">
+      <span class="swatch" id="swatch"></span>
+      <label>R <input type="range" id="r" min="0" max="255" value="0"></label>
+      <label>G <input type="range" id="g" min="0" max="255" value="0"></label>
+      <label>B <input type="range" id="b" min="0" max="255" value="0"></label>
+      <input type="text" id="hex" value="#000000" spellcheck="false">
+      <button id="btnColor" disabled>发送颜色</button>
+    </div>
+  </div>
+
+  <h2>串口日志</h2>
+  <div class="panel">
+    <div class="row">
+      <button id="btnPing" disabled>PING</button>
+      <button id="btnClearLog">清空日志</button>
+      <span class="info" id="devInfo"></span>
+    </div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const NUS = { service: "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+              rx: "6e400002-b5a3-f393-e0a9-e50e24dcca9e" };
+const MODE_GROUPS = {
+  states: ["idle","thinking","working","busy","success","error","blocked"],
+  static: ["off","red","yellow","green","alarm","demo","traffic"],
+};
+
+/* canonical display map — fetched from states.json, falls back to embedded copy */
+const EMBEDDED = { "off":{"color":"#8a8f98","label":"off"}, "idle":{"color":"#8a8f98","label":"idle"},
+  "thinking":{"color":"#f4c20d","label":"thinking"}, "working":{"color":"#f4c20d","label":"working"},
+  "busy":{"color":"#ff8a00","label":"busy"}, "success":{"color":"#1faa59","label":"success"},
+  "error":{"color":"#e8453c","label":"error"}, "blocked":{"color":"#b06fe8","label":"needs you"},
+  "alarm":{"color":"#ff2d78","label":"alarm"}, "demo":{"color":"#21bfd6","label":"demo"},
+  "traffic":{"color":"#21bfd6","label":"traffic"}, "red":{"color":"#e8453c","label":"red"},
+  "yellow":{"color":"#f4c20d","label":"yellow"}, "green":{"color":"#1faa59","label":"green"} };
+let DISPLAY = EMBEDDED;
+(async () => {
+  for (const url of ["./states.json", "../aistatus/states.json"]) {
+    try { const r = await fetch(url); if (r.ok) { const j = await r.json(); DISPLAY = j.display || EMBEDDED; break; } }
+    catch (e) {}
+  }
+  build();
+})();
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(cls, text) {
+  const span = document.createElement("span");
+  span.className = cls;
+  span.textContent = (cls === "l" ? "▶ " : "") + text + "\n";
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ---------------- transport ---------------- */
+let port = null, reader = null, bleChar = null, bleServer = null;
+function connected() { return !!(port || bleChar); }
+
+function setConn(state) {
+  $("led").classList.toggle("on", state);
+  $("connText").textContent = state ? "已连接" : "未连接";
+  $("btnConnect").textContent = state ? "断开" : "连接设备";
+  ["btnHello","btnColor","btnPing"].forEach(id => $(id).disabled = !state);
+}
+
+async function send(text) {
+  log("r", "→ " + text.trim());
+  if (port) { await port.write(new TextEncoder().encode(text + "\n")); return; }
+  if (bleChar) { await bleChar.writeValue(new TextEncoder().encode(text + "\n")); return; }
+  throw new Error("未连接");
+}
+
+function onData(chunk) {}  // reserved
+
+async function handleLine(line) {
+  const raw = line.replace(/\s+/g, " ").trim();
+  if (!raw) return;
+  log(raw.startsWith("ERR") ? "er" : "ok", "← " + raw);
+  if (raw.startsWith("HELLO") && raw.includes("v")) {
+    $("devInfo").textContent = raw;
+  }
+}
+
+async function readLoop() {
+  const chunks = [];
+  try {
+    while (port && reader) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(...value);
+      // split on newlines for the accumulated buffer
+      let i;
+      while ((i = chunks.indexOf(10)) >= 0) {
+        const line = chunks.splice(0, i + 1);
+        const s = new Uint8Array(line);
+        handleLine(new TextDecoder().decode(s));
+      }
+      if (chunks.length > 4096) chunks.length = 0;
+    }
+  } catch (e) { if (connected()) log("er", "读取中断: " + e.message); }
+}
+
+async function connectSerial() {
+  if (port) {
+    try { await reader.cancel(); } catch (e) {}
+    try { await port.close(); } catch (e) {}
+    port = null; reader = null; setConn(false); return;
+  }
+  port = await navigator.serial.requestPort();
+  await port.open({ baudRate: 115200 });
+  reader = port.readable.getReader();
+  readLoop();
+  log("l", "已连接 Web Serial @115200");
+  setConn(true);
+}
+
+async function connectBle() {
+  if (bleServer) {
+    if (bleServer.connected) bleServer.disconnect();
+    bleServer = null; bleChar = null; setConn(false); return;
+  }
+  bleServer = await navigator.bluetooth.requestDevice({
+    filters: [{ name: "AI-Status-Light" }, { services: [NUS.service] }],
+    optionalServices: [NUS.service],
+  });
+  const gatt = await bleServer.connect();
+  const svc = await gatt.getPrimaryService(NUS.service);
+  bleChar = await svc.getCharacteristic(NUS.rx);
+  await bleChar.startNotifications();
+  bleChar.addEventListener("characteristicvaluechanged", (ev) => {
+    const dv = ev.target.value;
+    let s = "";
+    for (let i = 0; i < dv.byteLength; i++) { const c = dv.getUint8(i);
+      if (c === 10) { handleLine(s); s = ""; } else if (c !== 13) s += String.fromCharCode(c); }
+    if (s) handleLine(s);
+  });
+  log("l", "已连接 BLE");
+  setConn(true);
+}
+
+$("btnConnect").onclick = async () => {
+  if (connected()) {
+    setConn(false);
+    if (port) { try { await reader.cancel(); } catch (e) {}
+      try { await port.close(); } catch (e) {}
+      port = null; reader = null; }
+    if (bleServer) { try { bleServer.disconnect(); } catch (e) {} bleServer = null; }
+    bleChar = null;
+    return;
+  }
+  try {
+    if ($("transport").value === "serial") await connectSerial();
+    else await connectBle();
+  } catch (e) { if (e.name !== "NotFoundError") log("er", "连接失败: " + e.message); }
+};
+
+$("btnHello").onclick = async () => { try { await send("HELLO"); } catch (e) { log("er", e.message); } };
+$("btnPing").onclick   = async () => { try { await send("PING"); } catch (e) { log("er", e.message); } };
+$("btnClearLog").onclick = () => { logEl.textContent = ""; };
+
+function build() {
+  for (const [group, modes] of Object.entries(MODE_GROUPS)) {
+    const el = $("grid" + (group === "states" ? "States" : "Static"));
+    el.textContent = "";
+    for (const m of modes) {
+      const info = DISPLAY[m] || { color: "#888", label: m };
+      const btn = document.createElement("button");
+      btn.className = "mode";
+      btn.innerHTML = `<span class="sw" style="background:${info.color}"></span>${info.label}`;
+      btn.onclick = async () => { try { await send("MODE " + m); } catch (e) { log("er", e.message); } };
+      el.appendChild(btn);
+    }
+  }
+  syncSwatch();
+}
+
+function syncSwatch() {
+  const hex = "#" + [r,g,b].map(v => v.toString(16).padStart(2,"0")).join("");
+  $("swatch").style.background = hex;
+  $("hex").value = hex;
+}
+function hexToRgb(h) {
+  h = h.replace("#","");
+  if (h.length !== 6) return null;
+  const v = parseInt(h, 16);
+  return [(v>>16)&255, (v>>8)&255, v&255];
+}
+$("hex").oninput = () => { const x = hexToRgb($("hex").value); if (x) { $("r").value=x[0]; $("g").value=x[1]; $("b").value=x[2]; syncSwatch(); } };
+for (const id of ["r","g","b"]) $(id).oninput = syncSwatch;
+$("btnColor").onclick = async () => { try {
+  await send(`COLOR ${$("r").value} ${$("g").value} ${$("b").value}`);
+} catch (e) { log("er", e.message); } };
+
+setConn(false);
+</script>
+</body>
+</html>
