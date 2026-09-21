@@ -5,14 +5,25 @@
 
 ## [Unreleased]
 
+### Added
+- **悬浮红绿灯**:透明无底、置顶、跨所有 Space/全屏的三灯组件;可拖动、
+  右下角拖拽或滚轮缩放;`⌥`+滚轮或状态面板滑块调透明度;悬停出现「固定/隐藏」;
+  **固定即点击穿透**(隐藏按钮,取消固定用菜单);位置与大小按屏幕持久化
+- ObjC 桥接 target `PrivateStatusItem`(私有 `NSStatusBar` 优先级 API,实验性)
+
 ### Changed
 - 菜单栏图标改为**单个玻璃圆点**(2x 渲染、径向渐变球 + 左上高光 + 柔光晕,按模式混色)
-- 用高优先级私有 API 尽量把图标排到菜单栏最右,并设 `autosaveName` 持久化位置
-- `make install` 可安装到 `/Applications`(Launchpad/Spotlight 可见,开机自启更可靠)
+- 状态面板高度按内容自适应
+- 「固定」即**点击穿透 + 锁位置/大小 + 隐藏按钮**;取消固定改用菜单「固定悬浮灯」
+- 移除全部全局快捷键(仅保留菜单入口)
+- `make install` 安装到 `/Applications`
 
-### Added
-- 全局快捷键 `⌥⌘L` 呼出状态面板(菜单栏图标被刘海挡住时的兜底入口)
-- ObjC 桥接 target `PrivateStatusItem`(私有 `NSStatusBar` 优先级 API,带 `respondsToSelector` 兜底)
+### Fixed
+- 状态面板高度写死导致透明度滑块被裁切
+
+### Removed
+- 网页控制面板:`webui.py`、`serve` 命令、`web/` 页面及菜单/按钮入口
+
 
 ## [0.1.0] - 2026-09-21
 

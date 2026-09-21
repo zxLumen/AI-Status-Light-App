@@ -13,10 +13,24 @@
 
 - **菜单栏单灯图标**(玻璃圆点:径向渐变球 + 高光 + 柔光晕,按模式混色),按当前状态呼吸 / 闪烁 / 交替 / 循环(与硬件灯效一致)
 - **直接读取**主机桥接的状态仓库,进程内聚合(优先级 + TTL + 手动覆盖),不依赖后台服务
-- 点击图标弹出菜单:当前状态、活跃会话(会话名 + 彩色圆点)、演示、清空、打开控制面板、开机自启、退出
-- **全局快捷键 `⌥⌘L`**:呼出状态面板——即使菜单栏图标被刘海挡住/被挤掉,也能随时查看
+- 点击图标弹出菜单:当前状态、活跃会话(会话名 + 彩色圆点)、状态面板、演示、清空、悬浮灯开关、开机自启、退出
+- **悬浮红绿灯**(菜单开关):透明无底、置顶、跨所有 Space/全屏;可拖动、可缩放、可固定
 - 图标位置用 `autosaveName` 持久化(`⌘` 拖拽后记住)
 - 无 Dock 图标(`LSUIElement`),纯菜单栏常驻
+
+## 悬浮红绿灯
+
+一个透明、置顶的三灯组件,窗口切来切去都在最上层。
+
+- **显示/隐藏**:菜单「显示悬浮灯」;启动默认显示
+- **移动**:直接拖拽
+- **缩放**:拖右下角,或在组件上滚轮
+- **透明度**:`⌥` + 滚轮,或菜单「状态面板」里的滑块
+- **悬停**出现两个小按钮:**📌 固定**、**✕ 隐藏**
+- **固定 = 点击穿透**:点 📌 后锁住位置/大小、隐藏按钮并开始穿透(点击落到下方窗口);
+  取消固定:菜单栏菜单 →「固定悬浮灯」
+- **显示位置**:菜单「悬浮灯显示在 → 仅主屏 / 所有屏幕」
+- 位置与大小会被记住(按屏幕分别持久化)
 
 ## 构建与运行
 
@@ -38,7 +52,7 @@ make install   # 构建并安装到 /Applications 后打开(推荐)
 - 本 App 用 `autosaveName` 记住你 `⌘` 拖拽后的位置。
 - 正解:**用 [Ice](https://github.com/jordanbaird/Ice) 等菜单栏工具收纳几个图标腾出空间**,再把「AI Status Light」拖到常显区/最右。
   - `brew install --cask jordanbaird-ice`,首次启动授予**辅助功能**权限,然后把它拖进 Visible 区。
-- 实在看不到图标时:按 **`⌥⌘L`** 打开面板。
+- 实在看不到图标时:从菜单打开「状态面板」。
 - 备注:代码里的 `PrivateStatusItem`(私有优先级 API)实测在 macOS 15 上不可靠(会把图标移到屏幕外),默认不启用,仅供实验(`AISTATUS_PRIVATE=1`)。
 
 ## 接入你的 agent(一次性)
@@ -85,28 +99,18 @@ aistatus install-hooks --agent all
   - `override.json` 手动覆盖
 - 契约:`aistatus/states.json`(优先级 / TTL / 颜色 / 标签),构建时复制进 App 的 `Contents/Resources`;运行时会优先读 `AISTATUS_CONTRACT` 或仓库内的同名文件,便于开发。
 
-## 控制面板(可选)
-
-桥接自带网页控制面板,可在菜单里一键打开:
-
-```bash
-.venv/bin/aistatus serve --open        # http://127.0.0.1:8377
-```
-
 ## 目录结构
 
 ```
 Package.swift                 SwiftPM 工程
-Sources/AIStatusLight/        App 源码(菜单栏 / 聚合 / 灯效 / 图标 / 面板 / 快捷键)
+Sources/AIStatusLight/        App 源码(菜单栏 / 聚合 / 灯效 / 图标 / 面板 / 悬浮窗)
 Sources/PrivateStatusItem/    ObjC 小桥接:高优先级放置状态项(私有 API,带兜底)
 Resources/Info.plist          打包用 Info.plist
 scripts/bundle.sh             组装 .app + ad-hoc 签名
-aistatus/                     主机桥接(Python):hooks、状态仓库、聚合、网页面板
-web/                          网页控制面板页面
+aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ```
 
 ## 备注
 
 - 菜单栏图标彩色需 `isTemplate=false`;深/浅色模式下对比度略有差异。
 - 会话名取不到时回退显示 agent 名,不显示裸 session id。
-- 全局快捷键 `⌥⌘L` 呼出面板;Esc/再次按下可收起。
