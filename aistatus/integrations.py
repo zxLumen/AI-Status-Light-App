@@ -42,6 +42,7 @@ OPENCODE_EVENTS = [
     "permission.asked",
     "permission.replied",
     "tool.execute.before",
+    "message.part.updated",
 ]
 
 ACTIVE_STATES = ("working", "busy", "thinking")
@@ -127,9 +128,9 @@ def opencode_state(event_type, status, session_id, idle_window=90):
         return "success" if _recent_activity(session_id, idle_window) else "idle"
     if et == "session.error":
         return "error"
-    if et in ("permission.updated", "permission.asked"):
+    if et in ("permission.updated", "permission.asked", "question.asked"):
         return "blocked"
-    if et == "permission.replied":
+    if et in ("permission.replied", "question.replied"):
         return "working"
     if et == "tool.execute.before":
         return "busy"

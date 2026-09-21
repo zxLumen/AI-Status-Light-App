@@ -10,6 +10,10 @@ const ALLOWED = __EVENTS__;
 const LOG = path.join(AI_STATUS_HOME, "opencode.log");
 const lastTitle = new Map();
 const lastDir = new Map();
+const lastQuestion = new Map();   // part id -> last status we forwarded
+const pendingQuestion = new Set(); // sessions currently blocked on a question
+
+const QUESTION_TOOL = "question";
 
 function log(line) {
   try {
@@ -23,6 +27,7 @@ function forward(eventType, properties) {
     session_id: properties.sessionID ?? properties.sessionId ?? null,
     session_name: properties.session_name ?? null,
     session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
+    message: properties.message ?? null,
     event: eventType,
     properties,
   });
@@ -57,6 +62,41 @@ export const AistatusPlugin = async () => {
       if (!sessionID) return;
       const title = info.title ?? props.title;
       const dir = info.directory ?? props.directory;
+
+      // The `question` tool blocks on the user choosing an option — surface it as
+      // blocked (opencode keeps session.status busy, so it needs special handling).
+      if (type === "message.part.updated") {
+        const part = props.part ?? {};
+        if (part.type === "tool" && part.tool === QUESTION_TOOL) {
+          const status = part.state?.status;
+          const qid = part.id ?? sessionID;
+          if (status === "running") {
+            pendingQuestion.add(sessionID);
+            if (lastQuestion.get(qid) !== "running") {
+              lastQuestion.set(qid, "running");
+              const text = part.state?.input?.questions?.[0]?.question ?? null;
+              log(`question.asked sid=${sessionID} ${JSON.stringify(text)}`);
+              forward("question.asked", { ...props, sessionID, message: text });
+            }
+          } else if (status === "completed" || status === "error") {
+            pendingQuestion.delete(sessionID);
+            if (lastQuestion.get(qid) !== "done") {
+              lastQuestion.set(qid, "done");
+              log(`question.replied sid=${sessionID} status=${status}`);
+              forward("question.replied", { ...props, sessionID });
+            }
+          }
+        }
+        return;
+      }
+
+      // While a question is pending, ignore busy so it doesn't overwrite blocked.
+      if (type === "session.status") {
+        const st = props.status?.type;
+        if (st === "idle") pendingQuestion.delete(sessionID);
+        else if (st === "busy" && pendingQuestion.has(sessionID)) return;
+      }
+
       // session.updated fires often; only forward when title/directory changes.
       if (type === "session.updated") {
         const titleChanged = title && lastTitle.get(sessionID) !== title;
