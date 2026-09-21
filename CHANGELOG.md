@@ -6,9 +6,12 @@
 ## [Unreleased]
 
 ### Added
+- **状态变化气泡**:任务进入 blocked/success/error 时在菜单栏图标下方弹出气泡,
+  显示 agent + 会话名,4s 自动淡出;点击跳转到任务 App(opencode→OpenCode、cursor→Cursor);
+  菜单可开关气泡并选停留时长;下拉菜单的会话行也可点击跳转
 - **悬浮红绿灯**:透明无底、置顶、跨所有 Space/全屏的三灯组件;可拖动、
   右下角拖拽或滚轮缩放;`⌥`+滚轮或状态面板滑块调透明度;悬停出现「固定/隐藏」;
-  **固定即点击穿透**(隐藏按钮,取消固定用菜单);位置与大小按屏幕持久化
+  **固定即点击穿透**(隐藏按钮,取消固定用菜单);可选**圆角外壳**;位置与大小按屏幕持久化
 - ObjC 桥接 target `PrivateStatusItem`(私有 `NSStatusBar` 优先级 API,实验性)
 
 ### Changed
@@ -19,6 +22,8 @@
 - `make install` 安装到 `/Applications`
 
 ### Fixed
+- 跳转改为按项目目录精准聚焦:opencode 用 VS Code CLI(`code <目录>`)定位对应窗口,
+  目录优先取桥接采集、缺失时只读查询 opencode 数据库;辅助功能标题匹配作为二级兜底
 - 状态面板高度写死导致透明度滑块被裁切
 
 ### Removed
