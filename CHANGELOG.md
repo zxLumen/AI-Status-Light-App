@@ -15,7 +15,7 @@
 - ObjC 桥接 target `PrivateStatusItem`(私有 `NSStatusBar` 优先级 API,实验性)
 
 ### Added
-- **切到窗口即确认**(菜单开关,默认开):把 success/error 会话所在窗口切到前台即视为已唤起并清除;
+- **切到窗口即确认**(菜单开关,默认开):把 success/error 会话所在窗口切到前台即视为已确认(置灰保留);
   用 AX 读焦点窗口标题**按项目文件夹精确匹配**(需辅助功能权限),未授权时退化为按 App 判断
 - 已完成且在看的窗口:不再弹 success/error 气泡
 

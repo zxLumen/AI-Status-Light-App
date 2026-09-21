@@ -8,10 +8,11 @@ struct SessionRecord: Decodable {
     let ts: Double
     var name: String?
     var dir: String?
+    var ack: Bool?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
-        case agent, state, message, ts, name, dir
+        case agent, state, message, ts, name, dir, ack
     }
 }
 
@@ -93,6 +94,21 @@ enum StateStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Keep the session listed but mark it "seen": no longer an attention state.
+    static func markAcknowledged(_ sessionId: String) {
+        let safe = sessionId.map { $0.isLetter || $0.isNumber || "-_.".contains($0) ? $0 : "_" }
+        let url = sessionsDir.appendingPathComponent(String(safe) + ".json")
+        guard let data = try? Data(contentsOf: url),
+              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let now = Date().timeIntervalSince1970
+        obj["ack"] = true
+        obj["ts"] = now
+        obj["seq"] = Int(now * 1000)
+        if let out = try? JSONSerialization.data(withJSONObject: obj) {
+            try? out.write(to: url)
+        }
+    }
+
     static func setOverride(mode: String, ttl: Double?) {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         var rec: [String: Any] = ["mode": mode, "ts": Date().timeIntervalSince1970]
@@ -110,7 +126,7 @@ enum Aggregator {
             return Aggregate(mode: ov.mode, state: ov.mode, reason: "manual override",
                              sessions: [], manual: true)
         }
-        let live = records.filter { now - $0.ts <= contract.ttl($0.state) }
+        let live = records.filter { $0.ack != true && now - $0.ts <= contract.ttl($0.state) }
         guard !live.isEmpty else {
             return Aggregate(mode: "idle", state: "idle", reason: "no active sessions",
                              sessions: [], manual: false)

@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         && (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
                             .localizedCaseInsensitiveContains(folder)
                 }
-                if match { StateStore.clearSession(rec.sessionId) }
+                if match { StateStore.markAcknowledged(rec.sessionId) }
             }
         }
     }
@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Already looking at that window → acknowledge silently, no bubble.
         if shownMode == "success" || shownMode == "error",
            let sid, preciselyFocused(agent: agent, dir: dir) {
-            StateStore.clearSession(sid)
+            StateStore.markAcknowledged(sid)
             return
         }
         let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
@@ -253,9 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !ok {
                 DispatchQueue.main.async { self?.panel.show() }
             }
-            // Acknowledged: a finished/failed session can now clear.
+            // Acknowledged: it stays listed, but stops being an attention state.
             if let sid = sessionId, let st = state, st == "success" || st == "error" {
-                StateStore.clearSession(sid)
+                StateStore.markAcknowledged(sid)
             }
         }
     }
@@ -322,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for rec in allSessions.sorted(by: { $0.ts > $1.ts }) {
                 let color = contract.colorHex(contract.mode(for: rec.state))
                 let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
-                let fresh = now - rec.ts <= contract.ttl(rec.state)
+                let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)
                 let item = NSMenuItem(title: "\(label) — \(rec.state)",
                                       action: #selector(jumpAgent(_:)), keyEquivalent: "")
                 item.target = self

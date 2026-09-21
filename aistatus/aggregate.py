@@ -30,7 +30,7 @@ def aggregate(records, now=None, overrides=None):
             "manual": True,
         }
 
-    live = [r for r in records if is_fresh(r, now)]
+    live = [r for r in records if is_fresh(r, now) and not r.get("ack")]
     if not live:
         return {"mode": "idle", "state": "idle", "reason": "no active sessions", "sessions": []}
 
