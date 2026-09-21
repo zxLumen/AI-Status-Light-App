@@ -192,12 +192,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func jump(agent: String, directory: String? = nil, sessionId: String? = nil) {
         _ = WindowFocuser.ensureTrusted()
+        // success/error stay until acknowledged here ("唤起"); capture state up front.
+        let state = sessionId.flatMap { sid in allSessions.first { $0.sessionId == sid }?.state }
         // Resolve directory / run the VS Code CLI off the main thread so a slow
         // `code`/`sqlite3` can never freeze the menu bar.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let ok = AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId)
             if !ok {
                 DispatchQueue.main.async { self?.panel.show() }
+            }
+            // Acknowledged: a finished/failed session can now clear.
+            if let sid = sessionId, let st = state, st == "success" || st == "error" {
+                StateStore.clearSession(sid)
             }
         }
     }

@@ -29,7 +29,7 @@
   "default_ttl": {
     "blocked": 31536000.0,
     "error": 60.0,
-    "success": 25.0,
+    "success": 31536000.0,
     "busy": 31536000.0,
     "working": 31536000.0,
     "thinking": 31536000.0,
