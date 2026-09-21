@@ -21,6 +21,11 @@
 - 移除全部全局快捷键(仅保留菜单入口)
 - `make install` 安装到 `/Applications`
 
+### Added
+- 气泡增强:问题文本展示、按状态分别开关、会话「中断」提示、多会话合并、
+  出错反复出现时升级为 alarm(气泡 + 灯短暂切 alarm)
+- opencode `question` 工具(等你选择)映射为 **blocked**,不再误显示为 working
+
 ### Fixed
 - 跳转改为按项目目录精准聚焦:opencode 用 VS Code CLI(`code <目录>`)定位对应窗口,
   目录优先取桥接采集、缺失时只读查询 opencode 数据库;辅助功能标题匹配作为二级兜底
