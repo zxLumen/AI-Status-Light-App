@@ -27,12 +27,12 @@
     "idle": 0
   },
   "default_ttl": {
-    "blocked": 1800.0,
+    "blocked": 31536000.0,
     "error": 60.0,
     "success": 25.0,
-    "busy": 1800.0,
-    "working": 1800.0,
-    "thinking": 1800.0,
+    "busy": 31536000.0,
+    "working": 31536000.0,
+    "thinking": 31536000.0,
     "idle": 15.0
   },
   "display": {

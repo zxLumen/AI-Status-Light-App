@@ -12,7 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let bubble = BubbleController()
     private var prevMode: String?
     private var lastBubbleAt = Date.distantPast
-    private var prevActive: Set<String> = []
     private var interruptNotified: Set<String> = []
     private var errorTimes: [Date] = []
     private var alarmAt = Date.distantPast
@@ -157,32 +156,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// A previously-active session that vanished without a terminal state
-    /// (agent crashed / terminal closed) → "interrupted" bubble.
+    /// A session that has been silent too long (no events, no heartbeat) is
+    /// treated as interrupted: drop it (→ idle) and optionally bubble.
     private func trackInterrupts(_ records: [SessionRecord]) {
         let now = Date().timeIntervalSince1970
-        let active = Set(records.filter {
-            ["working", "busy", "thinking"].contains($0.state) && now - $0.ts <= contract.ttl($0.state)
-        }.map { $0.sessionId })
-        for sid in prevActive.subtracting(active) where !interruptNotified.contains(sid) {
-            guard let rec = records.first(where: { $0.sessionId == sid }) else { continue }
-            let stale = now - rec.ts > contract.ttl(rec.state)
-            if stale, ["working", "busy", "thinking"].contains(rec.state) {
-                interruptNotified.insert(sid)
-                if bubbleEnabled("interrupt"),
-                   UserDefaults.standard.object(forKey: "ui.bubble") as? Bool ?? true {
-                    let name = (rec.name?.isEmpty == false) ? rec.name! : rec.agent
-                    bubble.show(label: "已中断", colorHex: "#ff8a00",
-                                session: name, agent: rec.agent, detail: "任务已结束(进程/终端可能已关闭)",
-                                canJump: AppLauncher.canJump(agent: rec.agent),
-                                duration: UserDefaults.standard.object(forKey: "ui.bubbleDuration") as? Double ?? 8,
-                                anchor: statusItemAnchor()) { [weak self] in
-                        self?.jump(agent: rec.agent, directory: rec.dir, sessionId: rec.sessionId)
-                    }
+        let silence: Double = 1200   // 20 minutes
+        let activeStates: Set<String> = ["working", "busy", "thinking", "blocked"]
+        let present = Set(records.map { $0.sessionId })
+        interruptNotified.formIntersection(present)
+
+        for rec in records where activeStates.contains(rec.state)
+            && now - rec.ts > silence && !interruptNotified.contains(rec.sessionId) {
+            interruptNotified.insert(rec.sessionId)
+            StateStore.clearSession(rec.sessionId)   // switch the light to idle
+            if bubbleEnabled("interrupt"),
+               UserDefaults.standard.object(forKey: "ui.bubble") as? Bool ?? true {
+                let name = (rec.name?.isEmpty == false) ? rec.name! : rec.agent
+                bubble.show(label: "已中断", colorHex: "#ff8a00",
+                            session: name, agent: rec.agent,
+                            detail: "超过 20 分钟无活动,进程/终端可能已关闭",
+                            canJump: AppLauncher.canJump(agent: rec.agent),
+                            duration: UserDefaults.standard.object(forKey: "ui.bubbleDuration") as? Double ?? 8,
+                            anchor: statusItemAnchor()) { [weak self] in
+                    self?.jump(agent: rec.agent, directory: rec.dir, sessionId: rec.sessionId)
                 }
             }
         }
-        prevActive = active
     }
 
     private func statusItemAnchor() -> NSRect? {

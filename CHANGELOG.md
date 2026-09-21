@@ -26,6 +26,11 @@
   出错反复出现时升级为 alarm(气泡 + 灯短暂切 alarm)
 - opencode `question` 工具(等你选择)映射为 **blocked**,不再误显示为 working
 
+### Changed
+- 活动态(working/busy/thinking)与 blocked 改为**常驻**(不再按时间过期),长任务不会中途掉;
+  新增**工具运行期间心跳**(每 3 分钟)与**20 分钟静默超时**:静默超时判定为中断,
+  删除该会话(灯切 idle)并可弹「已中断」气泡
+
 ### Fixed
 - opencode `busy` 从不触发:`tool.execute.before/after` 是插件 **hook**(非 event),
   现按 hook 转发为 busy/working

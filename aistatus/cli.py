@@ -86,6 +86,11 @@ def _session_dir(payload, agent):
 
 def cmd_hook(args):
     payload = _read_payload()
+    if str(payload.get("event") or "").lower() == "heartbeat":
+        sid = _first(payload, "session_id", "sessionId", "conversation_id", "thread_id", "id")
+        if sid:
+            store.touch(sid)
+        return 0
     agent, session, state, message = _resolve(args, payload)
     name = _session_name(payload, agent)
     if name:

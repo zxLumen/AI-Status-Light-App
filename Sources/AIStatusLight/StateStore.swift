@@ -87,6 +87,12 @@ enum StateStore {
         try? fm.removeItem(at: namesPath)
     }
 
+    static func clearSession(_ sessionId: String) {
+        let safe = sessionId.map { $0.isLetter || $0.isNumber || "-_.".contains($0) ? $0 : "_" }
+        let url = sessionsDir.appendingPathComponent(String(safe) + ".json")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func setOverride(mode: String, ttl: Double?) {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         var rec: [String: Any] = ["mode": mode, "ts": Date().timeIntervalSince1970]

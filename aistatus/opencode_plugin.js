@@ -13,6 +13,32 @@ const lastDir = new Map();
 const lastQuestion = new Map();   // part id -> last status we forwarded
 const lastThinking = new Map();   // part id -> already reported thinking
 const pendingQuestion = new Set(); // sessions currently blocked on a question
+const inflight = new Map();        // sessionID -> running tool count
+const heartbeats = new Map();      // sessionID -> interval id
+
+const HEARTBEAT_MS = 180000;       // refresh while a tool runs (3 min)
+
+function startHeartbeat(sid) {
+  if (heartbeats.has(sid)) return;
+  const id = setInterval(() => {
+    if (!inflight.get(sid)) {
+      clearInterval(id);
+      heartbeats.delete(sid);
+      return;
+    }
+    forward("heartbeat", { sessionID: sid });
+  }, HEARTBEAT_MS);
+  heartbeats.set(sid, id);
+}
+
+function stopHeartbeat(sid) {
+  if (inflight.get(sid)) return;
+  const id = heartbeats.get(sid);
+  if (id) {
+    clearInterval(id);
+    heartbeats.delete(sid);
+  }
+}
 
 const QUESTION_TOOL = "question";
 
@@ -73,13 +99,19 @@ export const AistatusPlugin = async () => {
     // Busy while a tool runs (these are hooks, not events).
     "tool.execute.before": async (input) => {
       const sid = input?.sessionID;
-      if (!sid || pendingQuestion.has(sid)) return;
+      if (!sid) return;
+      inflight.set(sid, (inflight.get(sid) ?? 0) + 1);
+      startHeartbeat(sid);
+      if (pendingQuestion.has(sid)) return;
       log(`tool.before sid=${sid} tool=${input?.tool}`);
       forward("tool.before", { sessionID: sid, tool: input?.tool });
     },
     "tool.execute.after": async (input) => {
       const sid = input?.sessionID;
-      if (!sid || pendingQuestion.has(sid)) return;
+      if (!sid) return;
+      inflight.set(sid, Math.max(0, (inflight.get(sid) ?? 1) - 1));
+      stopHeartbeat(sid);
+      if (pendingQuestion.has(sid)) return;
       forward("tool.after", { sessionID: sid, tool: input?.tool });
     },
     event: async ({ event }) => {

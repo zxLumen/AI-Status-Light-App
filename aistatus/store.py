@@ -134,6 +134,26 @@ def set_session_dir(session_id, directory):
         json.dump(data, f, ensure_ascii=False)
 
 
+def touch(session_id, ts=None):
+    """Refresh a session's timestamp without changing its state (heartbeat)."""
+    path = _path(session_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    ts = ts or now_ts()
+    rec["ts"] = ts
+    rec["at"] = iso(ts)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False)
+    os.replace(tmp, path)
+    return rec
+
+
 def clear(session_id=None):
     ensure_dirs()
     if session_id is None:
