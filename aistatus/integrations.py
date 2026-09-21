@@ -137,6 +137,27 @@ def opencode_state(event_type, status, session_id, idle_window=90):
     return None
 
 
+def opencode_state_for_payload(event_type, status, session_id, payload):
+    """opencode_state() plus a content-based fallback.
+
+    Some events (notably message.part.updated carrying the `question` tool) may
+    arrive with an unexpected event name; detect the waiting-on-user case from
+    the payload itself so it still maps to blocked.
+    """
+    state = opencode_state(event_type, status, session_id)
+    if state:
+        return state
+    props = payload.get("properties") or {}
+    part = props.get("part") if isinstance(props, dict) else None
+    if isinstance(part, dict) and part.get("tool") == "question":
+        s = (part.get("state") or {}).get("status")
+        if s == "running":
+            return "blocked"
+        if s in ("completed", "error"):
+            return "working"
+    return None
+
+
 def hook_command():
     return f'{sys.executable} -m aistatus hook'
 

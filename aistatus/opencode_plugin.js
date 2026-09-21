@@ -46,7 +46,7 @@ function forward(eventType, properties) {
     event: eventType,
     properties,
   });
-  const child = spawn(PY, ["-m", "aistatus", "hook", "--agent", "opencode", "--default-state", ""], {
+  const child = spawn(PY, ["-m", "aistatus", "hook", "--agent", "opencode", "--default-state", "", "--verbose"], {
     env: { ...process.env, AISTATUS_HOME: AI_STATUS_HOME },
     stdio: ["pipe", "ignore", "pipe"],
   });

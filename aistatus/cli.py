@@ -51,7 +51,7 @@ def _resolve(args, payload):
         props = payload.get("properties") or {}
         status = (_first(payload, "status", "session_status")
                   or props.get("status"))
-        state = integrations.opencode_state(event, status, session)
+        state = integrations.opencode_state_for_payload(event, status, session, payload)
 
     if not state and str(event).lower() == "notification":
         nt = str(_first(payload, "notification_type", "notificationType") or "").lower()
