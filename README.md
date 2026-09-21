@@ -29,7 +29,7 @@
 
 | idle | needs you(等你选择) |
 |---|---|
-| <img src="docs/images/menu-idle.jpg" width="330" alt="菜单 · idle"> | <img src="docs/images/menu-blocked.jpg" width="330" alt="菜单 · needs you"> |
+| <img src="docs/images/menu-idle.jpg" width="330" alt="菜单 · idle"> | <img src="docs/images/demo-menu-blocked.gif" width="330" alt="菜单 · needs you"> |
 
 ## 悬浮红绿灯
 
