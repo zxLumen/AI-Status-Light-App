@@ -103,6 +103,11 @@ export const AistatusPlugin = async () => {
       if (!sid) return;
       inflight.set(sid, (inflight.get(sid) ?? 0) + 1);
       startHeartbeat(sid);
+      // The question tool means "waiting for the user" → blocked, not busy.
+      if (input?.tool === QUESTION_TOOL) {
+        pendingQuestion.add(sid);
+        return;
+      }
       if (pendingQuestion.has(sid)) return;
       log(`tool.before sid=${sid} tool=${input?.tool}`);
       forward("tool.before", { sessionID: sid, tool: input?.tool });
@@ -112,6 +117,11 @@ export const AistatusPlugin = async () => {
       if (!sid) return;
       inflight.set(sid, Math.max(0, (inflight.get(sid) ?? 1) - 1));
       stopHeartbeat(sid);
+      // question.replied already returns to working.
+      if (input?.tool === QUESTION_TOOL) {
+        pendingQuestion.delete(sid);
+        return;
+      }
       if (pendingQuestion.has(sid)) return;
       forward("tool.after", { sessionID: sid, tool: input?.tool });
     },

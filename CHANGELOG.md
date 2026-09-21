@@ -45,6 +45,11 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- `question` 工具也会触发 `tool.execute.before`,导致等待期间被写成 **busy**;
+  现在 `question` 的 tool.before/after 不转发 busy/working(等待一律 blocked,
+  回答后由 question.replied 回到 working)
+
+### Fixed
 - 事件**乱序写入**导致状态卡住(如 `idle` 先落、并发进程的 `busy` 后落,把会话写成 working
   且常驻):插件为每个事件带单调 `seq`,`store.write_event` 忽略比现有记录更旧的事件
 
