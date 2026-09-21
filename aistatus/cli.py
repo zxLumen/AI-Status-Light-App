@@ -6,7 +6,7 @@ import os
 import sys
 import time
 
-from . import aggregate, integrations, protocol, render, states, store, transport, webui
+from . import aggregate, integrations, protocol, render, states, store, transport
 
 
 def _read_payload():
@@ -214,10 +214,6 @@ def cmd_uninstall_hooks(args):
     return 0
 
 
-def cmd_serve(args):
-    return webui.serve(host=args.host, port=args.port, webdir=args.web, open_browser=args.open)
-
-
 def cmd_clear(args):
     store.clear(args.session)
     if args.session is None:
@@ -280,13 +276,6 @@ def build_parser():
 
     d = sub.add_parser("devices", help="list serial ports and BLE availability")
     d.set_defaults(func=cmd_devices)
-
-    sv = sub.add_parser("serve", help="run the local web control panel (the lightd page)")
-    sv.add_argument("--host", default="127.0.0.1")
-    sv.add_argument("--port", type=int, default=8377)
-    sv.add_argument("--web", default=None, help="directory with the web pages")
-    sv.add_argument("--open", action="store_true", help="open the panel in a browser")
-    sv.set_defaults(func=cmd_serve)
 
     dm = sub.add_parser("demo", help="cycle through all light modes")
     dm.add_argument("--delay", type=float, default=1.2)
