@@ -19,9 +19,23 @@
 - 图标位置用 `autosaveName` 持久化(`⌘` 拖拽后记住)
 - 无 Dock 图标(`LSUIElement`),纯菜单栏常驻
 
+## 截图
+
+菜单栏下拉会显示当前状态与各会话,点会话行可跳转到对应窗口;悬浮灯与气泡随时反映同一状态。
+
+| working | success |
+|---|---|
+| <img src="docs/images/menu-working.jpg" width="330" alt="菜单 · working"> | <img src="docs/images/menu-success.jpg" width="330" alt="菜单 · success"> |
+
+| idle | needs you(等你选择) |
+|---|---|
+| <img src="docs/images/menu-idle.jpg" width="330" alt="菜单 · idle"> | <img src="docs/images/menu-blocked.jpg" width="330" alt="菜单 · needs you"> |
+
 ## 悬浮红绿灯
 
 一个透明、置顶的三灯组件,窗口切来切去都在最上层。
+
+<img src="docs/images/floating-shell.jpg" width="220" alt="悬浮红绿灯 · 圆角外壳">
 
 - **显示/隐藏**:菜单「显示悬浮灯」;启动默认显示
 - **移动**:直接拖拽
@@ -37,6 +51,9 @@
 ## 状态变化气泡
 
 任务进入**关键状态**时,菜单栏图标正下方弹出一个气泡:
+
+<img src="docs/images/bubble-needs-you.jpg" width="320" alt="等你选择(needs you)">
+<img src="docs/images/bubble-success.jpg" width="320" alt="完成(success)">
 
 - 显示 **状态 + agent + 会话名**;若是工具在问你问题(如 opencode 的 `question`),还会显示**问题文本**
 - 停留 **8s** 后自动淡出(菜单「气泡停留」可选 2/4/8s)
