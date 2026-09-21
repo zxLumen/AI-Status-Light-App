@@ -131,4 +131,8 @@ aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ## 备注
 
 - 菜单栏图标彩色需 `isTemplate=false`;深/浅色模式下对比度略有差异。
+- **别在旧的项目副本里跑 `install-hooks`**:不要复制项目后沿用旧的 `.venv`
+  (console script 的 shebang 会指向旧路径,插件里写死的 Python 也会指错,
+  表现为 hook 用旧代码、`question` 等新映射失效)。若已复制,请重建 venv,
+  或用 `python -m aistatus install-hooks` 安装以写入正确的解释器路径。
 - 会话名取不到时回退显示 agent 名,不显示裸 session id。
