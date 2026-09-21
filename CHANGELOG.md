@@ -14,6 +14,15 @@
   **固定即点击穿透**(隐藏按钮,取消固定用菜单);可选**圆角外壳**;位置与大小按屏幕持久化
 - ObjC 桥接 target `PrivateStatusItem`(私有 `NSStatusBar` 优先级 API,实验性)
 
+### Added
+- **切到窗口即确认**(菜单开关,默认开):把 success/error 会话所在窗口切到前台即视为已唤起并清除;
+  用 AX 读焦点窗口标题**按项目文件夹精确匹配**(需辅助功能权限),未授权时退化为按 App 判断
+- 已完成且在看的窗口:不再弹 success/error 气泡
+
+### Changed
+- 优先级调整为 `blocked > error > busy > working > thinking > success > idle`:
+  有人在干活时显示黄灯,不再被常驻的 success 绿灯压住
+
 ### Changed
 - **success 常驻**:完成态不再 25s 过期变灰,保持绿灯直到用户从气泡/菜单点击跳转「唤起」该会话
   (跳转时清除该 success/error 会话)

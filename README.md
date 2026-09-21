@@ -124,7 +124,8 @@ aistatus install-hooks --agent all
 | blocked(需要你) | 红/黄交替 |
 | traffic / demo | 三色循环 / 轮播 |
 
-优先级:`blocked > error > success > busy > working > thinking > idle`。
+优先级:`blocked > error > busy > working > thinking > success > idle`
+(即:**有人在干活时显示黄灯**;全部完成才显示绿灯;error/blocked 优先)。
 
 ## 状态来源
 
@@ -147,8 +148,10 @@ aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 
 ## 备注
 
-- **success 常驻**:任务完成后绿灯会一直亮,直到你从**气泡/菜单点击跳转「唤起」**它才清除
-  (所以别指望它会自己变灰/消失——这是刻意的,避免错过"已完成")
+- **success 常驻**:任务完成后绿灯会一直亮,直到**被「唤起」**才清除:
+  - 从**气泡/菜单点击跳转**,或
+  - **直接切到该会话窗口**(菜单「切到窗口即确认」,默认开;精确匹配窗口标题需**辅助功能**权限)
+  - 若此时**别的会话还在 working/busy**,灯显示黄灯(干活优先),success 仅在菜单里保持
 
 - 菜单栏图标彩色需 `isTemplate=false`;深/浅色模式下对比度略有差异。
 - **别在旧的项目副本里跑 `install-hooks`**:不要复制项目后沿用旧的 `.venv`

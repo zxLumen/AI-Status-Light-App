@@ -20,10 +20,10 @@
   "priority": {
     "blocked": 60,
     "error": 50,
-    "success": 40,
-    "busy": 30,
-    "working": 20,
-    "thinking": 15,
+    "busy": 40,
+    "working": 30,
+    "thinking": 25,
+    "success": 20,
     "idle": 0
   },
   "default_ttl": {

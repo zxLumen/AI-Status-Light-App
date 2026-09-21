@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var interruptNotified: Set<String> = []
     private var errorTimes: [Date] = []
     private var alarmAt = Date.distantPast
+    private var pollTick = 0
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -55,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         floating = FloatingLightController(state: appState)
+
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(self, selector: #selector(focusChanged),
+                       name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        nc.addObserver(self, selector: #selector(focusChanged),
+                       name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
         panel = PanelController(
             state: appState,
@@ -100,8 +107,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appState?.update(last)
         syncAnimation()
         trackInterrupts(records)
+        pollTick &+= 1
+        if pollTick % 4 == 0 { acknowledgeFocused() }
         maybeBubble()
     }
+
+    /// Clear a finished/failed session once its window is brought to the front.
+    private func acknowledgeFocused() {
+        guard UserDefaults.standard.object(forKey: "ui.ackOnFocus") as? Bool ?? true else { return }
+        let pending = allSessions.filter { $0.state == "success" || $0.state == "error" }
+        guard !pending.isEmpty,
+              let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let trusted = WindowFocuser.isTrusted
+            for rec in pending {
+                guard AppLauncher.targetBundleIds(for: rec.agent).contains(front) else { continue }
+                var match = true
+                if let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId),
+                   !dir.isEmpty, trusted {
+                    let folder = (dir as NSString).lastPathComponent
+                    match = !folder.isEmpty
+                        && (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
+                            .localizedCaseInsensitiveContains(folder)
+                }
+                if match { StateStore.clearSession(rec.sessionId) }
+            }
+        }
+    }
+
+    /// Precise "already looking at it" check (needs Accessibility).
+    private func preciselyFocused(agent: String, dir: String?) -> Bool {
+        guard WindowFocuser.isTrusted,
+              let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+              AppLauncher.targetBundleIds(for: agent).contains(front),
+              let d = dir ?? nil, !d.isEmpty else { return false }
+        let folder = (d as NSString).lastPathComponent
+        guard !folder.isEmpty else { return false }
+        return (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
+            .localizedCaseInsensitiveContains(folder)
+    }
+
+    @objc private func focusChanged() { acknowledgeFocused() }
 
     private func bubbleEnabled(_ key: String) -> Bool {
         UserDefaults.standard.object(forKey: "ui.bubble.\(key)") as? Bool ?? (key != "interrupt")
@@ -144,6 +190,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let label = (mode == "blocked" && blockedCount > 1) ? "\(blockedCount) 个任务需要你"
                                                             : contract.label(shownMode)
         let detail = (top?.message?.isEmpty == false) ? top!.message : nil
+        // Already looking at that window → acknowledge silently, no bubble.
+        if shownMode == "success" || shownMode == "error",
+           let sid, preciselyFocused(agent: agent, dir: dir) {
+            StateStore.clearSession(sid)
+            return
+        }
         let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
         bubble.show(label: label,
                     colorHex: contract.colorHex(shownMode),
@@ -364,6 +416,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buIt.submenu = buSub
         menu.addItem(buIt)
 
+        let ack = action("切到窗口即确认", #selector(toggleAckOnFocus))
+        ack.state = (UserDefaults.standard.object(forKey: "ui.ackOnFocus") as? Bool ?? true) ? .on : .off
+        menu.addItem(ack)
+
         menu.addItem(.separator())
         menu.addItem(action("退出", #selector(quit), key: "q"))
     }
@@ -426,6 +482,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setBubbleDuration(_ sender: NSMenuItem) {
         UserDefaults.standard.set(Double(sender.tag), forKey: "ui.bubbleDuration")
+    }
+
+    @objc private func toggleAckOnFocus() {
+        let d = UserDefaults.standard
+        d.set(!(d.object(forKey: "ui.ackOnFocus") as? Bool ?? true), forKey: "ui.ackOnFocus")
     }
 
     @objc private func toggleBubbleState(_ sender: NSMenuItem) {

@@ -25,6 +25,19 @@ enum WindowFocuser {
         }
     }
 
+    /// Title of the app's currently focused window (nil if untrusted / unknown).
+    static func focusedWindowTitle(bundleId: String) -> String? {
+        guard isTrusted,
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else { return nil }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var winRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
+              let win = winRef else { return nil }
+        var titleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(win as! AXUIElement, kAXTitleAttribute as CFString, &titleRef) == .success else { return nil }
+        return titleRef as? String
+    }
+
     /// Activate the app and raise the window whose title contains `needle`.
     /// Returns false when unmapped/untrusted/not found (caller falls back).
     @discardableResult
