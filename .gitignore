@@ -8,3 +8,6 @@ __pycache__/
 debug/
 *.aistatus.bak
 .DS_Store
+
+# 录屏原文件
+*.mov

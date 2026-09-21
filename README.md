@@ -25,7 +25,7 @@
 
 | working | success |
 |---|---|
-| <img src="docs/images/menu-working.jpg" width="330" alt="菜单 · working"> | <img src="docs/images/menu-success.jpg" width="330" alt="菜单 · success"> |
+| <img src="docs/images/demo-menu-working.gif" width="330" alt="菜单 · working"> | <img src="docs/images/menu-success.jpg" width="330" alt="菜单 · success"> |
 
 | idle | needs you(等你选择) |
 |---|---|
@@ -52,7 +52,7 @@
 
 任务进入**关键状态**时,菜单栏图标正下方弹出一个气泡:
 
-<img src="docs/images/bubble-needs-you.jpg" width="320" alt="等你选择(needs you)">
+<img src="docs/images/demo-bubble-question.gif" width="320" alt="等你选择(needs you)">
 <img src="docs/images/bubble-success.jpg" width="320" alt="完成(success)">
 
 - 显示 **状态 + agent + 会话名**;若是工具在问你问题(如 opencode 的 `question`),还会显示**问题文本**
