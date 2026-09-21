@@ -12,6 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let bubble = BubbleController()
     private var prevMode: String?
     private var lastBubbleAt = Date.distantPast
+    private var prevActive: Set<String> = []
+    private var interruptNotified: Set<String> = []
+    private var errorTimes: [Date] = []
+    private var alarmAt = Date.distantPast
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -95,7 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         last = Aggregator.aggregate(records, contract: contract)
         appState?.update(last)
         syncAnimation()
+        trackInterrupts(records)
         maybeBubble()
+    }
+
+    private func bubbleEnabled(_ key: String) -> Bool {
+        UserDefaults.standard.object(forKey: "ui.bubble.\(key)") as? Bool ?? (key != "interrupt")
     }
 
     /// Show a menu bar bubble when the aggregate settles into a key state.
@@ -107,23 +116,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let d = UserDefaults.standard
         guard d.object(forKey: "ui.bubble") as? Bool ?? true else { return }
         guard Date().timeIntervalSince(lastBubbleAt) > 3 else { return }
+
+        // Error escalation: repeated failures turn into an alarm.
+        var shownMode = mode
+        if mode == "error", bubbleEnabled("error") {
+            let now = Date()
+            errorTimes.append(now)
+            errorTimes = errorTimes.filter { now.timeIntervalSince($0) < 120 }
+            if errorTimes.count >= 2, now.timeIntervalSince(alarmAt) > 30 {
+                alarmAt = now
+                shownMode = "alarm"
+                StateStore.setOverride(mode: "alarm", ttl: 30)   // escalate the light too
+            }
+        }
+        let key = shownMode == "alarm" ? "error" : mode
+        guard bubbleEnabled(key) else { return }
         lastBubbleAt = Date()
 
-        let top = last.sessions.max { contract.priorityOf($0.state) < contract.priorityOf($1.state) }
+        // Merge multiple "needs you" sessions into one bubble.
+        let live = last.sessions.filter { Date().timeIntervalSince1970 - $0.ts <= contract.ttl($0.state) }
+        let blockedCount = live.filter { $0.state == "blocked" }.count
+        let top = live.max { contract.priorityOf($0.state) < contract.priorityOf($1.state) }
         let agent = top?.agent ?? ""
         let dir = top?.dir
         let sid = top?.sessionId
         let name = (top?.name?.isEmpty == false) ? top!.name! : agent
+        let label = (mode == "blocked" && blockedCount > 1) ? "\(blockedCount) 个任务需要你"
+                                                            : contract.label(shownMode)
+        let detail = (top?.message?.isEmpty == false) ? top!.message : nil
         let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
-        bubble.show(label: contract.label(mode),
-                    colorHex: contract.colorHex(mode),
+        bubble.show(label: label,
+                    colorHex: contract.colorHex(shownMode),
                     session: name,
                     agent: agent,
+                    detail: detail,
                     canJump: AppLauncher.canJump(agent: agent),
                     duration: duration,
                     anchor: statusItemAnchor()) { [weak self] in
             self?.jump(agent: agent, directory: dir, sessionId: sid)
         }
+    }
+
+    /// A previously-active session that vanished without a terminal state
+    /// (agent crashed / terminal closed) → "interrupted" bubble.
+    private func trackInterrupts(_ records: [SessionRecord]) {
+        let now = Date().timeIntervalSince1970
+        let active = Set(records.filter {
+            ["working", "busy", "thinking"].contains($0.state) && now - $0.ts <= contract.ttl($0.state)
+        }.map { $0.sessionId })
+        for sid in prevActive.subtracting(active) where !interruptNotified.contains(sid) {
+            guard let rec = records.first(where: { $0.sessionId == sid }) else { continue }
+            let stale = now - rec.ts > contract.ttl(rec.state)
+            if stale, ["working", "busy", "thinking"].contains(rec.state) {
+                interruptNotified.insert(sid)
+                if bubbleEnabled("interrupt"),
+                   UserDefaults.standard.object(forKey: "ui.bubble") as? Bool ?? true {
+                    let name = (rec.name?.isEmpty == false) ? rec.name! : rec.agent
+                    bubble.show(label: "已中断", colorHex: "#ff8a00",
+                                session: name, agent: rec.agent, detail: "任务已结束(进程/终端可能已关闭)",
+                                canJump: AppLauncher.canJump(agent: rec.agent),
+                                duration: UserDefaults.standard.object(forKey: "ui.bubbleDuration") as? Double ?? 8,
+                                anchor: statusItemAnchor()) { [weak self] in
+                        self?.jump(agent: rec.agent, directory: rec.dir, sessionId: rec.sessionId)
+                    }
+                }
+            }
+        }
+        prevActive = active
     }
 
     private func statusItemAnchor() -> NSRect? {
@@ -247,6 +306,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bu = action("状态变化气泡", #selector(toggleBubble))
         bu.state = (UserDefaults.standard.object(forKey: "ui.bubble") as? Bool ?? true) ? .on : .off
         menu.addItem(bu)
+
+        let stateSub = NSMenu()
+        for (title, key) in [("需要你", "blocked"), ("完成", "success"), ("出错", "error"), ("中断", "interrupt")] {
+            let it = NSMenuItem(title: title, action: #selector(toggleBubbleState(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = key
+            it.state = bubbleEnabled(key) ? .on : .off
+            stateSub.addItem(it)
+        }
+        let stateIt = NSMenuItem(title: "提示状态", action: nil, keyEquivalent: "")
+        stateIt.submenu = stateSub
+        menu.addItem(stateIt)
+
         let buSub = NSMenu()
         let curDur = UserDefaults.standard.object(forKey: "ui.bubbleDuration") as? Double ?? 8
         for secs in [2.0, 4.0, 8.0] {
@@ -322,6 +394,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setBubbleDuration(_ sender: NSMenuItem) {
         UserDefaults.standard.set(Double(sender.tag), forKey: "ui.bubbleDuration")
+    }
+
+    @objc private func toggleBubbleState(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        let d = UserDefaults.standard
+        let cur = d.object(forKey: "ui.bubble.\(key)") as? Bool ?? (key != "interrupt")
+        d.set(!cur, forKey: "ui.bubble.\(key)")
     }
 
     @objc private func toggleLogin() {

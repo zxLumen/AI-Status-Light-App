@@ -86,6 +86,15 @@ enum StateStore {
         }
         try? fm.removeItem(at: namesPath)
     }
+
+    static func setOverride(mode: String, ttl: Double?) {
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        var rec: [String: Any] = ["mode": mode, "ts": Date().timeIntervalSince1970]
+        if let ttl { rec["ttl"] = ttl }
+        if let data = try? JSONSerialization.data(withJSONObject: rec) {
+            try? data.write(to: overridePath)
+        }
+    }
 }
 
 enum Aggregator {

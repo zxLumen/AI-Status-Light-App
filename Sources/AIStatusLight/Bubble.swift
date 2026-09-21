@@ -9,6 +9,7 @@ struct BubbleView: View {
     let colorHex: String
     let session: String
     let agent: String
+    let detail: String?
     let canJump: Bool
     var onTap: () -> Void
     var onClose: () -> Void
@@ -26,6 +27,13 @@ struct BubbleView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary.opacity(0.8))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(canJump ? "点击跳转" : "点击打开状态面板")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
@@ -41,7 +49,7 @@ struct BubbleView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .frame(width: 250, alignment: .leading)
+        .frame(width: 270, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -68,14 +76,14 @@ final class BubbleController {
     private var panel: NSPanel?
     private var hideTimer: Timer?
     private var onClick: (() -> Void)?
-
     func show(label: String, colorHex: String, session: String, agent: String,
-              canJump: Bool, duration: Double, anchor: NSRect?, onClick: @escaping () -> Void) {
+              detail: String? = nil, canJump: Bool, duration: Double, anchor: NSRect?,
+              onClick: @escaping () -> Void) {
         dismiss()
         self.onClick = onClick
 
         let view = BubbleView(label: label, colorHex: colorHex, session: session,
-                              agent: agent, canJump: canJump,
+                              agent: agent, detail: detail, canJump: canJump,
                               onTap: { [weak self] in
                                   self?.onClick?()
                                   self?.dismiss()
