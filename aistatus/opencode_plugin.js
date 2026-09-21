@@ -11,6 +11,7 @@ const LOG = path.join(AI_STATUS_HOME, "opencode.log");
 const lastTitle = new Map();
 const lastDir = new Map();
 const lastQuestion = new Map();   // part id -> last status we forwarded
+const lastThinking = new Map();   // part id -> already reported thinking
 const pendingQuestion = new Set(); // sessions currently blocked on a question
 
 const QUESTION_TOOL = "question";
@@ -69,6 +70,18 @@ function pick(value, ...keys) {
 export const AistatusPlugin = async () => {
   log("plugin loaded");
   return {
+    // Busy while a tool runs (these are hooks, not events).
+    "tool.execute.before": async (input) => {
+      const sid = input?.sessionID;
+      if (!sid || pendingQuestion.has(sid)) return;
+      log(`tool.before sid=${sid} tool=${input?.tool}`);
+      forward("tool.before", { sessionID: sid, tool: input?.tool });
+    },
+    "tool.execute.after": async (input) => {
+      const sid = input?.sessionID;
+      if (!sid || pendingQuestion.has(sid)) return;
+      forward("tool.after", { sessionID: sid, tool: input?.tool });
+    },
     event: async ({ event }) => {
       const type = event?.type;
       if (!type || !ALLOWED.includes(type)) return;
@@ -85,6 +98,18 @@ export const AistatusPlugin = async () => {
       // blocked (opencode keeps session.status busy, so it needs special handling).
       if (type === "message.part.updated") {
         const part = props.part ?? {};
+        // Model reasoning → thinking (once per part).
+        if (part.type === "reasoning") {
+          const rid = part.id ?? sessionID;
+          if (lastThinking.get(rid) !== "done") {
+            lastThinking.set(rid, "done");
+            if (!pendingQuestion.has(sessionID)) {
+              log(`thinking sid=${sessionID}`);
+              forward("thinking", { sessionID });
+            }
+          }
+          return;
+        }
         if (part.type === "tool" && part.tool === QUESTION_TOOL) {
           const status = part.state?.status;
           const qid = part.id ?? sessionID;

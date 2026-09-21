@@ -27,6 +27,13 @@
 - opencode `question` 工具(等你选择)映射为 **blocked**,不再误显示为 working
 
 ### Fixed
+- opencode `busy` 从不触发:`tool.execute.before/after` 是插件 **hook**(非 event),
+  现按 hook 转发为 busy/working
+- opencode 新增 `thinking`:由 `message.part.updated` 的 reasoning 部分派生
+- `working/busy/thinking` 长时间无事件会被 90s TTL 清掉(灯"变没");
+  活动态 TTL 提到 1800s,`blocked` 也提到 1800s
+
+### Fixed
 - 跳转改为按项目目录精准聚焦:opencode 用 VS Code CLI(`code <目录>`)定位对应窗口,
   目录优先取桥接采集、缺失时只读查询 opencode 数据库;辅助功能标题匹配作为二级兜底
 - 状态面板高度写死导致透明度滑块被裁切

@@ -130,10 +130,14 @@ def opencode_state(event_type, status, session_id, idle_window=90):
         return "error"
     if et in ("permission.updated", "permission.asked", "question.asked"):
         return "blocked"
-    if et in ("permission.replied", "question.replied"):
+    if et in ("permission.replied", "question.replied", "tool.after"):
         return "working"
-    if et == "tool.execute.before":
+    if et == "tool.execute.before" or et == "tool.before":
         return "busy"
+    if et in ("thinking", "step.start"):
+        return "thinking"
+    if et == "working":
+        return "working"
     return None
 
 
