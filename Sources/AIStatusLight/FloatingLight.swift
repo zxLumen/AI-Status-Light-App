@@ -9,12 +9,14 @@ final class FloatingSettings: ObservableObject {
     @Published var pinned: Bool { didSet { d.set(pinned, forKey: "floating.pinned") } }
     @Published var allScreens: Bool { didSet { d.set(allScreens, forKey: "floating.allScreens") } }
     @Published var opacity: Double { didSet { d.set(opacity, forKey: "floating.opacity") } }
+    @Published var shell: Bool { didSet { d.set(shell, forKey: "floating.shell") } }
 
     init() {
         visible = d.object(forKey: "floating.visible") as? Bool ?? true
         pinned = d.object(forKey: "floating.pinned") as? Bool ?? false
         allScreens = d.object(forKey: "floating.allScreens") as? Bool ?? false
         opacity = d.object(forKey: "floating.opacity") as? Double ?? 1.0
+        shell = d.object(forKey: "floating.shell") as? Bool ?? false
     }
 }
 
@@ -26,39 +28,81 @@ struct FloatingLamps: View {
 
     var body: some View {
         GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            let shell = settings.shell
+            let glow: CGFloat = 1.35                       // cell = glow room around the lamp
+            let dShell = min(w / 1.62, h / 4.698)
+            let dPlain = min(w / glow, h / (3 * glow))
+            let d = max(5, shell ? dShell : dPlain)
+            let cell = d * glow
+            let margin = shell ? cell * 0.10 : 0
+            let gap = shell ? cell * 0.14 : 0
+            let colW = shell ? cell + margin * 2 : w
+            let colH = shell ? cell * 3 + gap * 2 + margin * 2 : h
+            let spacing = shell ? gap : (h - cell * 3) / 4
             TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { ctx in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 let lv = Pattern.levels(state.mode, t)
-                let w = geo.size.width, h = geo.size.height
-                let d = max(6, min(w * 0.82, h / 3 * 0.76))
-                VStack(spacing: (h - d * 3) / 4) {
-                    lamp(lv.r, StatusIcon.red, d)
-                    lamp(lv.y, StatusIcon.yellow, d)
-                    lamp(lv.g, StatusIcon.green, d)
+                VStack(spacing: spacing) {
+                    lamp(lv.r, StatusIcon.red, d, cell)
+                    lamp(lv.y, StatusIcon.yellow, d, cell)
+                    lamp(lv.g, StatusIcon.green, d, cell)
                 }
-                .frame(width: w, height: h)
+                .frame(width: colW, height: colH)
+                .background(housing(corner: min(colW, colH) * 0.18))
             }
+            .frame(width: w, height: h)
         }
         .opacity(settings.opacity)
         .allowsHitTesting(false)
+    }
+
+    /// Optional rounded "traffic light" housing behind the lamps. Drawn as a
+    /// static background (outside the animation) so it doesn't add per-frame cost.
+    @ViewBuilder
+    private func housing(corner: CGFloat) -> some View {
+        if settings.shell {
+            let r = max(10, min(corner, 32))
+            RoundedRectangle(cornerRadius: r, style: .continuous)
+                .fill(LinearGradient(colors: [Color(white: 0.26), Color(white: 0.08)],
+                                     startPoint: .top, endPoint: .bottom))
+                .overlay(
+                    RoundedRectangle(cornerRadius: r, style: .continuous)
+                        .strokeBorder(LinearGradient(
+                            colors: [Color.white.opacity(0.28), Color.white.opacity(0.02)],
+                            startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                )
+                .padding(2)
+                .shadow(color: .black.opacity(0.35), radius: 7, y: 2)
+        }
     }
 
     /// One stable view tree per lamp (no `if` branch) so the lit/unlit transition
     /// never swaps subtrees each frame — that was causing the stutter. Brightness
     /// is expressed through colour + opacity; the glow is a gradient layer instead
     /// of `.shadow` (no offscreen rendering).
-    private func lamp(_ level: Double, _ color: NSColor, _ d: CGFloat) -> some View {
+    private func lamp(_ level: Double, _ color: NSColor, _ d: CGFloat, _ cell: CGFloat) -> some View {
         let on = CGFloat(max(0, min(1, level)))
         let housing = NSColor(white: 0.26, alpha: 1)
         let body = housing.blended(withFraction: on, of: color) ?? color
         let light = StatusIcon.lighten(body, 0.22)
         return ZStack {
+            // glow, contained inside `cell` (fades to 0 at the edge → no clipping)
             Circle()
                 .fill(RadialGradient(
                     colors: [Color(nsColor: color).opacity(0.55 * on),
                              Color(nsColor: color).opacity(0)],
-                    center: .center, startRadius: d * 0.45, endRadius: d * 0.95))
-                .frame(width: d * 1.9, height: d * 1.9)
+                    center: .center, startRadius: d * 0.5, endRadius: cell * 0.5))
+                .frame(width: cell, height: cell)
+            if settings.shell {
+                // recessed lamp socket
+                Circle()
+                    .fill(RadialGradient(colors: [Color(white: 0.03), Color(white: 0.17)],
+                                         center: .center, startRadius: d * 0.12, endRadius: d * 0.70))
+                    .frame(width: d * 1.30, height: d * 1.30)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.55),
+                                                   lineWidth: max(0.8, d * 0.05)))
+            }
             Circle()
                 .fill(RadialGradient(
                     colors: [Color(nsColor: light), Color(nsColor: body)],
@@ -72,9 +116,8 @@ struct FloatingLamps: View {
                 .strokeBorder(Color.black.opacity(0.25), lineWidth: max(0.6, d * 0.03))
                 .frame(width: d, height: d)
         }
-        .frame(width: d, height: d)
+        .frame(width: cell, height: cell)
         .opacity(0.5 + 0.5 * Double(on))
-        .compositingGroup()
     }
 }
 
@@ -85,6 +128,7 @@ final class FloatingRootView: NSView {
     var onTogglePin: (() -> Void)?
     var onClose: (() -> Void)?
     var onOpacityDelta: ((CGFloat) -> Void)?
+    var aspectRatio: CGFloat?          // when set, resize is locked to this w/h
     private(set) var pinned = false
 
     private let hosting: NSView
@@ -127,6 +171,8 @@ final class FloatingRootView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -189,11 +235,16 @@ final class FloatingRootView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         guard resizing, let panel else { return super.mouseDragged(with: event) }
-        let dx = event.locationInWindow.x - resizeStart.x
         let dy = event.locationInWindow.y - resizeStart.y
         var f = startFrame
-        f.size.width = max(34, startFrame.width + dx)
-        f.size.height = max(90, startFrame.height - dy)
+        if let ar = aspectRatio {
+            let newH = max(120, startFrame.height - dy)
+            f.size = NSSize(width: newH * ar, height: newH)
+        } else {
+            let dx = event.locationInWindow.x - resizeStart.x
+            f.size.width = max(34, startFrame.width + dx)
+            f.size.height = max(90, startFrame.height - dy)
+        }
         f.origin.y = startFrame.maxY - f.height
         panel.setFrame(f, display: true)
     }
@@ -211,8 +262,8 @@ final class FloatingRootView: NSView {
         guard !pinned, let panel else { return super.scrollWheel(with: event) }
         let factor = 1 + event.scrollingDeltaY * 0.01
         var f = panel.frame
-        let newW = max(34, min(500, f.width * factor))
         let newH = max(90, min(1400, f.height * factor))
+        let newW = aspectRatio.map { newH * $0 } ?? max(34, min(500, f.width * factor))
         f.origin.y += f.height - newH
         f.size = NSSize(width: newW, height: newH)
         panel.setFrame(f, display: true)
@@ -254,10 +305,13 @@ final class FloatingLightController: NSObject, ObservableObject {
     @objc private func screensChanged() { sync() }
 
     var pinned: Bool { settings.pinned }
+    static let shellAspect: CGFloat = 1.56 / 4.524   // w/h of the snug lamp column
+
     func toggleVisible() { settings.visible.toggle(); sync() }
     func togglePin() { settings.pinned.toggle(); sync() }
     func setAllScreens(_ on: Bool) { settings.allScreens = on; sync() }
     func setOpacity(_ v: Double) { settings.opacity = min(1, max(0.2, v)) }
+    func setShell(_ on: Bool) { settings.shell = on; sync() }
 
     func sync() {
         if !settings.visible { tearDown(); return }
@@ -269,7 +323,18 @@ final class FloatingLightController: NSObject, ObservableObject {
             }
         }
         for p in panels {
-            (p.contentView as? FloatingRootView)?.setPinned(settings.pinned)
+            if let root = p.contentView as? FloatingRootView {
+                root.setPinned(settings.pinned)
+                root.aspectRatio = settings.shell ? Self.shellAspect : nil
+                if settings.shell {
+                    var f = p.frame
+                    let newW = f.height * Self.shellAspect
+                    if abs(newW - f.width) > 0.5 {
+                        f.size.width = newW
+                        p.setFrame(f, display: true)
+                    }
+                }
+            }
             p.orderFrontRegardless()
         }
     }
