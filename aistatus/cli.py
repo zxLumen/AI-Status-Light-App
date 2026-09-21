@@ -75,12 +75,24 @@ def _session_name(payload, agent):
     return name
 
 
+def _session_dir(payload, agent):
+    directory = _first(payload, "session_dir", "directory", "cwd")
+    if not directory and str(agent) == "opencode":
+        props = payload.get("properties") or {}
+        info = props.get("info") or {}
+        directory = info.get("directory") or props.get("directory")
+    return directory
+
+
 def cmd_hook(args):
     payload = _read_payload()
     agent, session, state, message = _resolve(args, payload)
     name = _session_name(payload, agent)
     if name:
         store.set_session_name(session, name)
+    directory = _session_dir(payload, agent)
+    if directory:
+        store.set_session_dir(session, directory)
     if args.verbose:
         print(f"hook agent={agent} session={session} state={state} name={name}", file=sys.stderr)
     if not state:

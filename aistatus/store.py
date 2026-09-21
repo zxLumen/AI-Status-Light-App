@@ -59,6 +59,7 @@ def write_event(session_id, agent, state, message=None, ts=None):
 def read_sessions(max_age=None):
     ensure_dirs()
     names = session_names()
+    dirs = session_dirs()
     out = []
     cutoff = None if max_age is None else now_ts() - max_age
     for name in os.listdir(sessions_dir()):
@@ -72,6 +73,7 @@ def read_sessions(max_age=None):
         if cutoff is not None and rec.get("ts", 0) < cutoff:
             continue
         rec["name"] = names.get(str(rec.get("session_id")))
+        rec["dir"] = dirs.get(str(rec.get("session_id")))
         out.append(rec)
     return out
 
@@ -104,6 +106,34 @@ def set_session_name(session_id, name):
         json.dump(data, f, ensure_ascii=False)
 
 
+def dirs_path():
+    return os.path.join(home_dir(), "dirs.json")
+
+
+def session_dirs():
+    path = dirs_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_session_dir(session_id, directory):
+    if not directory:
+        return
+    ensure_dirs()
+    data = session_dirs()
+    if data.get(str(session_id)) == str(directory):
+        return
+    data[str(session_id)] = str(directory)
+    with open(dirs_path(), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
 def clear(session_id=None):
     ensure_dirs()
     if session_id is None:
@@ -115,6 +145,10 @@ def clear(session_id=None):
                     pass
         try:
             os.remove(names_path())
+        except OSError:
+            pass
+        try:
+            os.remove(dirs_path())
         except OSError:
             pass
         return
@@ -129,6 +163,10 @@ def clear(session_id=None):
     if data.pop(str(session_id), None) is not None:
         with open(names_path(), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+    ddata = session_dirs()
+    if ddata.pop(str(session_id), None) is not None:
+        with open(dirs_path(), "w", encoding="utf-8") as f:
+            json.dump(ddata, f, ensure_ascii=False)
 
 
 def override_path():

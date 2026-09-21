@@ -9,6 +9,7 @@ const AI_STATUS_HOME = __AI_STATUS_HOME__;
 const ALLOWED = __EVENTS__;
 const LOG = path.join(AI_STATUS_HOME, "opencode.log");
 const lastTitle = new Map();
+const lastDir = new Map();
 
 function log(line) {
   try {
@@ -21,6 +22,7 @@ function forward(eventType, properties) {
   const payload = JSON.stringify({
     session_id: properties.sessionID ?? properties.sessionId ?? null,
     session_name: properties.session_name ?? null,
+    session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
     event: eventType,
     properties,
   });
@@ -54,13 +56,17 @@ export const AistatusPlugin = async () => {
         ?? pick(event, "sessionID", "sessionId");
       if (!sessionID) return;
       const title = info.title ?? props.title;
-      // session.updated fires often; only forward when the title actually changes.
+      const dir = info.directory ?? props.directory;
+      // session.updated fires often; only forward when title/directory changes.
       if (type === "session.updated") {
-        if (!title || lastTitle.get(sessionID) === title) return;
+        const titleChanged = title && lastTitle.get(sessionID) !== title;
+        const dirChanged = dir && lastDir.get(sessionID) !== dir;
+        if (!titleChanged && !dirChanged) return;
       }
       if (title) lastTitle.set(sessionID, title);
-      log(`${type} sid=${sessionID} title=${JSON.stringify(title ?? null)} status=${JSON.stringify(pick(props, "status"))}`);
-      forward(type, { ...props, sessionID, session_name: title });
+      if (dir) lastDir.set(sessionID, dir);
+      log(`${type} sid=${sessionID} title=${JSON.stringify(title ?? null)} dir=${JSON.stringify(dir ?? null)} status=${JSON.stringify(pick(props, "status"))}`);
+      forward(type, { ...props, sessionID, session_name: title, session_dir: dir });
     },
   };
 };
