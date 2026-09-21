@@ -7,10 +7,11 @@ struct SessionRecord: Decodable {
     let message: String?
     let ts: Double
     var name: String?
+    var dir: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
-        case agent, state, message, ts, name
+        case agent, state, message, ts, name, dir
     }
 }
 

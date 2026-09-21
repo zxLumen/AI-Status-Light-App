@@ -9,9 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var appState: AppState!
     private var panel: PanelController!
     private var floating: FloatingLightController!
+    private let bubble = BubbleController()
+    private var prevMode: String?
+    private var lastBubbleAt = Date.distantPast
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
+    private var allSessions: [SessionRecord] = []
     private var pollTimer: Timer?
     private var animTimer: Timer?
     private var animEpoch = Date()
@@ -86,9 +90,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func poll() {
-        last = Aggregator.aggregate(StateStore.readSessions(), contract: contract)
+        let records = StateStore.readSessions()
+        allSessions = records
+        last = Aggregator.aggregate(records, contract: contract)
         appState?.update(last)
         syncAnimation()
+        maybeBubble()
+    }
+
+    /// Show a menu bar bubble when the aggregate settles into a key state.
+    private func maybeBubble() {
+        let mode = last.mode
+        defer { prevMode = mode }
+        guard let prev = prevMode, mode != prev else { return }
+        guard ["blocked", "success", "error"].contains(mode) else { return }
+        let d = UserDefaults.standard
+        guard d.object(forKey: "ui.bubble") as? Bool ?? true else { return }
+        guard Date().timeIntervalSince(lastBubbleAt) > 3 else { return }
+        lastBubbleAt = Date()
+
+        let top = last.sessions.max { contract.priorityOf($0.state) < contract.priorityOf($1.state) }
+        let agent = top?.agent ?? ""
+        let dir = top?.dir
+        let sid = top?.sessionId
+        let name = (top?.name?.isEmpty == false) ? top!.name! : agent
+        let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
+        bubble.show(label: contract.label(mode),
+                    colorHex: contract.colorHex(mode),
+                    session: name,
+                    agent: agent,
+                    canJump: AppLauncher.canJump(agent: agent),
+                    duration: duration,
+                    anchor: statusItemAnchor()) { [weak self] in
+            self?.jump(agent: agent, directory: dir, sessionId: sid)
+        }
+    }
+
+    private func statusItemAnchor() -> NSRect? {
+        guard let btn = statusItem.button, let win = btn.window else { return nil }
+        return win.convertToScreen(btn.convert(btn.bounds, to: nil))
+    }
+
+    private func jump(agent: String, directory: String? = nil, sessionId: String? = nil) {
+        _ = WindowFocuser.ensureTrusted()
+        if !AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId) {
+            panel.show()
+        }
     }
 
     private func refreshIcon() {
@@ -125,13 +172,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(disabled(gray(last.reason)))
         menu.addItem(.separator())
 
-        if last.sessions.isEmpty {
-            menu.addItem(disabled(gray("无活跃会话")))
+        if allSessions.isEmpty {
+            menu.addItem(disabled(gray("无会话")))
         } else {
-            for rec in last.sessions.sorted(by: { contract.priorityOf($0.state) > contract.priorityOf($1.state) }).prefix(8) {
+            let now = Date().timeIntervalSince1970
+            for rec in allSessions.sorted(by: { $0.ts > $1.ts }) {
                 let color = contract.colorHex(contract.mode(for: rec.state))
                 let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
-                menu.addItem(disabled(line(color, "\(label) — \(rec.state)")))
+                let fresh = now - rec.ts <= contract.ttl(rec.state)
+                let item = NSMenuItem(title: "\(label) — \(rec.state)",
+                                      action: #selector(jumpAgent(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = ["agent": rec.agent, "dir": rec.dir ?? "", "sid": rec.sessionId] as NSDictionary
+                var title = line(color, "\(label) — \(rec.state)")
+                if !fresh {
+                    let dim = NSMutableAttributedString(attributedString: title)
+                    dim.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+                                     range: NSRange(location: 0, length: dim.length))
+                    title = dim
+                }
+                item.attributedTitle = title
+                item.toolTip = AppLauncher.canJump(agent: rec.agent) ? "点击跳到 \(rec.agent)" : "点击打开状态面板"
+                menu.addItem(item)
             }
         }
 
@@ -142,6 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let login = action("开机自启", #selector(toggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
+        if !WindowFocuser.isTrusted {
+            menu.addItem(action("授予辅助功能权限(精准跳窗口)", #selector(openAccessibility)))
+        }
 
         menu.addItem(.separator())
         let fl = action("显示悬浮灯", #selector(toggleFloating))
@@ -150,6 +215,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fp = action("固定悬浮灯", #selector(toggleFloatingPin))
         fp.state = floating.settings.pinned ? .on : .off
         menu.addItem(fp)
+        let sh = action("悬浮圆角外壳", #selector(toggleFloatingShell))
+        sh.state = floating.settings.shell ? .on : .off
+        menu.addItem(sh)
         let sub = NSMenu()
         let onlyMain = NSMenuItem(title: "仅主屏", action: #selector(showMainScreenOnly), keyEquivalent: "")
         onlyMain.target = self
@@ -174,6 +242,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let opItem = NSMenuItem(title: "悬浮灯不透明度", action: nil, keyEquivalent: "")
         opItem.submenu = opSub
         menu.addItem(opItem)
+
+        menu.addItem(.separator())
+        let bu = action("状态变化气泡", #selector(toggleBubble))
+        bu.state = (UserDefaults.standard.object(forKey: "ui.bubble") as? Bool ?? true) ? .on : .off
+        menu.addItem(bu)
+        let buSub = NSMenu()
+        let curDur = UserDefaults.standard.object(forKey: "ui.bubbleDuration") as? Double ?? 8
+        for secs in [2.0, 4.0, 8.0] {
+            let it = NSMenuItem(title: "\(Int(secs))s", action: #selector(setBubbleDuration(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = Int(secs)
+            it.state = abs(curDur - secs) < 0.1 ? .on : .off
+            buSub.addItem(it)
+        }
+        let buIt = NSMenuItem(title: "气泡停留", action: nil, keyEquivalent: "")
+        buIt.submenu = buSub
+        menu.addItem(buIt)
 
         menu.addItem(.separator())
         menu.addItem(action("退出", #selector(quit), key: "q"))
@@ -220,8 +305,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.toggle()
     }
 
+    @objc private func jumpAgent(_ sender: NSMenuItem) {
+        let info = sender.representedObject as? NSDictionary
+        let agent = (info?["agent"] as? String) ?? ""
+        let dir = (info?["dir"] as? String)
+        let sid = (info?["sid"] as? String)
+        jump(agent: agent, directory: (dir?.isEmpty == false) ? dir : nil, sessionId: sid)
+    }
+
+    @objc private func toggleBubble() {
+        let d = UserDefaults.standard
+        let on = !(d.object(forKey: "ui.bubble") as? Bool ?? true)
+        d.set(on, forKey: "ui.bubble")
+        dbg("bubble = \(on)")
+    }
+
+    @objc private func setBubbleDuration(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(Double(sender.tag), forKey: "ui.bubbleDuration")
+    }
+
     @objc private func toggleLogin() {
         LoginItem.toggle()
+    }
+
+    @objc private func openAccessibility() {
+        WindowFocuser.openSettings()
     }
 
     @objc private func toggleFloating() {
@@ -230,6 +338,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleFloatingPin() {
         floating.togglePin()
+    }
+
+    @objc private func toggleFloatingShell() {
+        floating.setShell(!floating.settings.shell)
     }
 
     @objc private func showMainScreenOnly() {
