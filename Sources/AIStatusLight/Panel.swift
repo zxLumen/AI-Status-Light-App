@@ -5,9 +5,9 @@ import SwiftUI
 /// when the menu bar item is hidden under the notch.
 struct PanelView: View {
     @ObservedObject var state: AppState
+    @ObservedObject var settings: FloatingSettings
     var onDemo: () -> Void
     var onClear: () -> Void
-    var onOpen: () -> Void
     var onQuit: () -> Void
 
     var body: some View {
@@ -57,10 +57,20 @@ struct PanelView: View {
             }
 
             Divider()
+
+            HStack(spacing: 8) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .foregroundStyle(.secondary)
+                Text("悬浮灯透明度").font(.caption)
+                Slider(value: $settings.opacity, in: 0.2...1.0)
+                Text("\(Int(settings.opacity * 100))%")
+                    .font(.caption).monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+
             HStack {
                 Button("演示", action: onDemo)
                 Button("清空", action: onClear)
-                Button("控制面板", action: onOpen)
                 Spacer()
                 Button("退出", action: onQuit)
             }
@@ -73,20 +83,20 @@ struct PanelView: View {
 final class PanelController {
     private var window: NSWindow?
     private let state: AppState
+    private let settings: FloatingSettings
     private let onDemo: () -> Void
     private let onClear: () -> Void
-    private let onOpen: () -> Void
     private let onQuit: () -> Void
 
     init(state: AppState,
+         settings: FloatingSettings,
          onDemo: @escaping () -> Void,
          onClear: @escaping () -> Void,
-         onOpen: @escaping () -> Void,
          onQuit: @escaping () -> Void) {
         self.state = state
+        self.settings = settings
         self.onDemo = onDemo
         self.onClear = onClear
-        self.onOpen = onOpen
         self.onQuit = onQuit
     }
 
@@ -100,17 +110,24 @@ final class PanelController {
 
     func show() {
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 300),
+            let host = NSHostingView(rootView: PanelView(state: state,
+                                                         settings: settings,
+                                                         onDemo: onDemo,
+                                                         onClear: onClear,
+                                                         onQuit: onQuit))
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 380),
                              styleMask: [.titled, .closable],
                              backing: .buffered, defer: false)
             w.title = "AI Status Light"
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: PanelView(state: state,
-                                                              onDemo: onDemo,
-                                                              onClear: onClear,
-                                                              onOpen: onOpen,
-                                                              onQuit: onQuit))
+            w.contentView = host
             window = w
+        }
+        if let host = window?.contentView {
+            let fit = host.fittingSize
+            let w = (fit.width.isFinite && fit.width > 200) ? min(max(340, fit.width), 520) : 360
+            let h = (fit.height.isFinite && fit.height > 120) ? min(fit.height, 720) : 420
+            window?.setContentSize(NSSize(width: w, height: h))
         }
         window?.center()
         window?.makeKeyAndOrderFront(nil)

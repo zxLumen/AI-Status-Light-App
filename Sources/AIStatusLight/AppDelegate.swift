@@ -1,6 +1,5 @@
 import AppKit
 import ServiceManagement
-import Carbon.HIToolbox
 import PrivateStatusItem
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -9,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menu: NSMenu!
     private var appState: AppState!
     private var panel: PanelController!
-    private var hotKey: HotKey?
+    private var floating: FloatingLightController!
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -47,18 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
 
+        floating = FloatingLightController(state: appState)
+
         panel = PanelController(
             state: appState,
+            settings: floating.settings,
             onDemo: { [weak self] in self?.startDemo() },
             onClear: { [weak self] in self?.clearState() },
-            onOpen: { [weak self] in self?.openPanel() },
             onQuit: { NSApp.terminate(nil) })
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_L),
-                        modifiers: UInt32(cmdKey | optionKey)) { [weak self] in
-            self?.panel.toggle()
-        }
-        if hotKey == nil { dbg("hot key registration failed") }
-
         poll()
         let t = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.poll()
@@ -143,10 +138,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(action("演示(Demo)", #selector(startDemo)))
         menu.addItem(action("清空状态", #selector(clearState)))
-        menu.addItem(action("打开控制面板", #selector(openPanel)))
+        menu.addItem(action("状态面板", #selector(showStatusPanel)))
         let login = action("开机自启", #selector(toggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
+
+        menu.addItem(.separator())
+        let fl = action("显示悬浮灯", #selector(toggleFloating))
+        fl.state = floating.settings.visible ? .on : .off
+        menu.addItem(fl)
+        let fp = action("固定悬浮灯", #selector(toggleFloatingPin))
+        fp.state = floating.settings.pinned ? .on : .off
+        menu.addItem(fp)
+        let sub = NSMenu()
+        let onlyMain = NSMenuItem(title: "仅主屏", action: #selector(showMainScreenOnly), keyEquivalent: "")
+        onlyMain.target = self
+        onlyMain.state = floating.settings.allScreens ? .off : .on
+        let allScreens = NSMenuItem(title: "所有屏幕", action: #selector(showAllScreens), keyEquivalent: "")
+        allScreens.target = self
+        allScreens.state = floating.settings.allScreens ? .on : .off
+        sub.addItem(onlyMain)
+        sub.addItem(allScreens)
+        let subItem = NSMenuItem(title: "悬浮灯显示在", action: nil, keyEquivalent: "")
+        subItem.submenu = sub
+        menu.addItem(subItem)
+
+        let opSub = NSMenu()
+        for pct in [100, 80, 60, 40] {
+            let it = NSMenuItem(title: "\(pct)%", action: #selector(setFloatingOpacity(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = pct
+            it.state = abs(floating.settings.opacity * 100 - Double(pct)) < 2 ? .on : .off
+            opSub.addItem(it)
+        }
+        let opItem = NSMenuItem(title: "悬浮灯不透明度", action: nil, keyEquivalent: "")
+        opItem.submenu = opSub
+        menu.addItem(opItem)
+
         menu.addItem(.separator())
         menu.addItem(action("退出", #selector(quit), key: "q"))
     }
@@ -188,14 +216,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         poll()
     }
 
-    @objc private func openPanel() {
-        if let url = URL(string: "http://127.0.0.1:8377") {
-            NSWorkspace.shared.open(url)
-        }
+    @objc private func showStatusPanel() {
+        panel.toggle()
     }
 
     @objc private func toggleLogin() {
         LoginItem.toggle()
+    }
+
+    @objc private func toggleFloating() {
+        floating.toggleVisible()
+    }
+
+    @objc private func toggleFloatingPin() {
+        floating.togglePin()
+    }
+
+    @objc private func showMainScreenOnly() {
+        floating.setAllScreens(false)
+    }
+
+    @objc private func showAllScreens() {
+        floating.setAllScreens(true)
+    }
+
+    @objc private func setFloatingOpacity(_ sender: NSMenuItem) {
+        floating.setOpacity(Double(sender.tag) / 100.0)
     }
 
     @objc private func quit() {
