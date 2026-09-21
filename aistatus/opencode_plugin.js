@@ -22,8 +22,23 @@ function log(line) {
   } catch (e) {}
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (e) {
+    const seen = new Set();
+    return JSON.stringify(value, (k, v) => {
+      if (typeof v === "object" && v !== null) {
+        if (seen.has(v)) return undefined;
+        seen.add(v);
+      }
+      return v;
+    });
+  }
+}
+
 function forward(eventType, properties) {
-  const payload = JSON.stringify({
+  const payload = safeStringify({
     session_id: properties.sessionID ?? properties.sessionId ?? null,
     session_name: properties.session_name ?? null,
     session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
@@ -37,8 +52,11 @@ function forward(eventType, properties) {
   });
   let err = "";
   child.stderr.on("data", (d) => { err += d.toString(); });
+  child.on("error", (e) => log(`hook spawn error ${eventType}: ${e}`));
   child.on("exit", (code) => {
-    if (code) log(`aside hook exit=${code} ${eventType}${err ? " :: " + err.trim().split("\n").slice(-2).join(" | ") : ""}`);
+    if (code || eventType.startsWith("question")) {
+      log(`aside hook exit=${code} ${eventType}${err ? " :: " + err.trim().split("\n").slice(-2).join(" | ") : ""}`);
+    }
   });
   child.stdin.end(payload);
 }
@@ -76,14 +94,14 @@ export const AistatusPlugin = async () => {
               lastQuestion.set(qid, "running");
               const text = part.state?.input?.questions?.[0]?.question ?? null;
               log(`question.asked sid=${sessionID} ${JSON.stringify(text)}`);
-              forward("question.asked", { ...props, sessionID, message: text });
+              forward("question.asked", { sessionID, message: text, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status: "running" } } });
             }
           } else if (status === "completed" || status === "error") {
             pendingQuestion.delete(sessionID);
             if (lastQuestion.get(qid) !== "done") {
               lastQuestion.set(qid, "done");
               log(`question.replied sid=${sessionID} status=${status}`);
-              forward("question.replied", { ...props, sessionID });
+              forward("question.replied", { sessionID, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status } } });
             }
           }
         }
