@@ -70,6 +70,7 @@ function forward(eventType, properties) {
     session_name: properties.session_name ?? null,
     session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
     message: properties.message ?? null,
+    seq: Date.now(),
     event: eventType,
     properties,
   });

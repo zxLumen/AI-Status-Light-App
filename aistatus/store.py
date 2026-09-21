@@ -37,8 +37,20 @@ def iso(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def write_event(session_id, agent, state, message=None, ts=None):
+def write_event(session_id, agent, state, message=None, ts=None, seq=None):
     ensure_dirs()
+    path = _path(session_id)
+    # Ignore out-of-order writes: concurrent hook processes may finish in the
+    # wrong order (e.g. a stale "busy" landing after "idle").
+    if seq is not None and os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f)
+            old = existing.get("seq")
+            if isinstance(old, (int, float)) and seq < old:
+                return existing
+        except (OSError, ValueError):
+            pass
     ts = ts or now_ts()
     record = {
         "session_id": str(session_id),
@@ -47,8 +59,8 @@ def write_event(session_id, agent, state, message=None, ts=None):
         "message": message,
         "ts": ts,
         "at": iso(ts),
+        "seq": seq,
     }
-    path = _path(session_id)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(record, f, ensure_ascii=False)

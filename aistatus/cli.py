@@ -103,7 +103,7 @@ def cmd_hook(args):
     if not state:
         print("hook: no state mapped, skipping", file=sys.stderr)
         return 0
-    store.write_event(session, agent, state, message=message)
+    store.write_event(session, agent, state, message=message, seq=payload.get("seq"))
     if args.direct:
         transport.build(args.transport, port=args.port, name=args.ble_name).send(
             states.mode_for_state(state))
