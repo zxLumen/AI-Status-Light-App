@@ -14,6 +14,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/$CONFIG/AIStatusLight" "$APP/Contents/MacOS/AIStatusLight"
 cp "$ROOT/aistatus/states.json" "$APP/Contents/Resources/states.json"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+# App icon (optional: regenerate with `make icon`).
+if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
+  cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 # Sign with a *stable* identity so macOS TCC permissions (Accessibility /
 # Automation) persist across rebuilds. Falls back to ad-hoc when unavailable.

@@ -6,6 +6,9 @@ __pycache__/
 *.pyc
 *.egg-info/
 debug/
+
+# 图标中间产物(由 make icon 生成,提交 .icns 即可)
+Resources/AppIcon.iconset/
 *.aistatus.bak
 .DS_Store
 

@@ -6,6 +6,12 @@
 ## [Unreleased]
 
 ### Added
+- **应用图标**:深色圆角机身 + 竖排三玻璃灯(红/黄/绿,全亮),与悬浮灯「圆角外壳」同源
+  - 新增 `scripts/make-icon.swift`(AppKit 矢量绘制)与 `make icon`;生成
+    `Resources/AppIcon.icns` 与 `docs/images/icon-1024.png`,小尺寸自动简化细节
+  - `Info.plist` 增加 `CFBundleIconFile`;`bundle.sh` 打包图标;启动时设 `applicationIconImage`
+
+### Added
 - **手机 / 手表推送(Bark)**:任务进入 需要你 / 完成 / 出错 时推到 iPhone,
   再由 iOS 通知镜像到手表。新增 `Push.swift`(`PushConfig` + `PushNotifier`):
   - 配置 `~/.ai-status-light/push.json`(密钥只在此,不进仓库;日志只记主机名)

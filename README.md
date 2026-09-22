@@ -1,5 +1,7 @@
 # AI Status Light
 
+<img src="docs/images/icon-1024.png" width="120" align="right" alt="App 图标">
+
 一盏住在 macOS **菜单栏**的红绿灯:实时映射你的 AI 编程 agent 正在干什么——**在干活**、**干完了**、还是**在等你**。不用再盯着终端。
 
 支持 **Claude Code**、**Cursor**、**Codex**、**opencode** 四个 agent。这是"软件灯"版本:菜单栏图标本身就是那盏灯,不需要任何硬件。
@@ -105,6 +107,7 @@ macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(
 
 ```bash
 make build     # swift build -c release
+make icon      # 重新生成 App 图标(Resources/AppIcon.icns + docs/images/icon-1024.png)
 make bundle    # 组装 "build/AI Status Light.app"(稳定签名,回退 ad-hoc)
 make run       # 构建并打开 App
 make install   # 构建并安装到 /Applications 后打开(推荐)
@@ -174,7 +177,9 @@ Package.swift                 SwiftPM 工程
 Sources/AIStatusLight/        App 源码(菜单栏 / 聚合 / 灯效 / 图标 / 面板 / 悬浮窗)
 Sources/PrivateStatusItem/    ObjC 小桥接:高优先级放置状态项(私有 API,带兜底)
 Resources/Info.plist          打包用 Info.plist
+Resources/AppIcon.icns        App 图标(由 scripts/make-icon.swift 生成)
 scripts/bundle.sh             组装 .app + 稳定签名(回退 ad-hoc)
+scripts/make-icon.swift       矢量绘制 App 图标并打包 .icns
 aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ```
 

@@ -47,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appState = AppState(contract: contract)
         push.log = { [weak self] line in self?.appLog(line) }
         installMainMenu()
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
 
         let env = ProcessInfo.processInfo.environment
         // The private priority API turned out unreliable on macOS 15 (it can place
