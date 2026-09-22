@@ -98,6 +98,10 @@ def cmd_hook(args):
     directory = _session_dir(payload, agent)
     if directory:
         store.set_session_dir(session, directory)
+    host = _first(payload, "session_host", "host")
+    ref = _first(payload, "session_ref", "ref")
+    if host or ref:
+        store.set_session_host(session, host, ref)
     if args.verbose:
         print(f"hook agent={agent} session={session} state={state} name={name}", file=sys.stderr)
     if not state:

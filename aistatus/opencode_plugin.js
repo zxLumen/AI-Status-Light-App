@@ -42,6 +42,26 @@ function stopHeartbeat(sid) {
 
 const QUESTION_TOOL = "question";
 
+// Host terminal/desktop detection (drives which app the menu bar jumps to).
+const TERM_HOSTS = {
+  "iTerm.app": "com.googlecode.iterm2",
+  "vscode": "com.microsoft.VSCode",
+  "Apple_Terminal": "com.apple.Terminal",
+  "WarpTerminal": "dev.warp.Warp-Stable",
+  "WezTerm": "com.github.wez.wezterm",
+  "Hyper": "co.zeit.hyper",
+  "Tabby": "org.tabby",
+};
+function detectHost() {
+  try { if (process.versions && process.versions.electron) return "ai.opencode.desktop"; } catch (e) {}
+  const tp = process.env.TERM_PROGRAM || "";
+  if (TERM_HOSTS[tp]) return TERM_HOSTS[tp];
+  if (tp) return null;                       // unknown terminal → let the app decide
+  return "ai.opencode.desktop";              // no terminal info → desktop app
+}
+const HOST = detectHost();
+const HOST_REF = process.env.ITERM_SESSION_ID || process.env.TERM_SESSION_ID || null;
+
 function log(line) {
   try {
     fs.mkdirSync(AI_STATUS_HOME, { recursive: true });
@@ -53,40 +73,69 @@ function safeStringify(value) {
   try {
     return JSON.stringify(value);
   } catch (e) {
-    const seen = new Set();
-    return JSON.stringify(value, (k, v) => {
-      if (typeof v === "object" && v !== null) {
-        if (seen.has(v)) return undefined;
-        seen.add(v);
-      }
-      return v;
-    });
+    try {
+      const seen = new Set();
+      return JSON.stringify(value, (k, v) => {
+        if (typeof v === "object" && v !== null) {
+          if (seen.has(v)) return undefined;
+          seen.add(v);
+        }
+        return v;
+      });
+    } catch (e2) {
+      log(`stringify failed: ${e2 && e2.message}`);
+      return "{}";
+    }
   }
 }
+
+// Serialize forwards: one hook child at a time so writes land in order and
+// every failure is observable (no silent drops).
+const queue = [];
+let sending = false;
 
 function forward(eventType, properties) {
   const payload = safeStringify({
     session_id: properties.sessionID ?? properties.sessionId ?? null,
     session_name: properties.session_name ?? null,
     session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
+    session_host: HOST,
+    session_ref: HOST_REF,
     message: properties.message ?? null,
     seq: Date.now(),
     event: eventType,
     properties,
   });
+  queue.push({ payload, eventType });
+  if (!sending) pump();
+}
+
+function pump() {
+  const item = queue.shift();
+  if (!item) { sending = false; return; }
+  sending = true;
   const child = spawn(PY, ["-m", "aistatus", "hook", "--agent", "opencode", "--default-state", "", "--verbose"], {
     env: { ...process.env, AISTATUS_HOME: AI_STATUS_HOME },
     stdio: ["pipe", "ignore", "pipe"],
   });
   let err = "";
+  let done = false;
+  const finish = () => { if (done) return; done = true; sending = false; pump(); };
   child.stderr.on("data", (d) => { err += d.toString(); });
-  child.on("error", (e) => log(`hook spawn error ${eventType}: ${e}`));
+  child.on("error", (e) => { log(`hook spawn error ${item.eventType}: ${e}`); finish(); });
   child.on("exit", (code) => {
-    if (code || eventType.startsWith("question")) {
-      log(`aside hook exit=${code} ${eventType}${err ? " :: " + err.trim().split("\n").slice(-2).join(" | ") : ""}`);
+    const msg = err.trim();
+    if (code || msg || item.eventType.startsWith("question")) {
+      log(`hook exit=${code} ${item.eventType}${msg ? " :: " + msg.split("\n").slice(-2).join(" | ") : ""}`);
     }
+    finish();
   });
-  child.stdin.end(payload);
+  try {
+    child.stdin.end(item.payload);
+  } catch (e) {
+    log(`stdin error ${item.eventType}: ${e}`);
+    finish();
+  }
 }
 
 function pick(value, ...keys) {
@@ -95,7 +144,7 @@ function pick(value, ...keys) {
 }
 
 export const AistatusPlugin = async () => {
-  log("plugin loaded");
+  log(`plugin loaded host=${HOST} ref=${HOST_REF ?? "null"}`);
   return {
     // Busy while a tool runs (these are hooks, not events).
     "tool.execute.before": async (input) => {

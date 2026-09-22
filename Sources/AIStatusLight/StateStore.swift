@@ -9,10 +9,12 @@ struct SessionRecord: Decodable {
     var name: String?
     var dir: String?
     var ack: Bool?
+    var host: String?
+    var ref: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
-        case agent, state, message, ts, name, dir, ack
+        case agent, state, message, ts, name, dir, ack, host, ref
     }
 }
 

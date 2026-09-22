@@ -72,6 +72,7 @@ def read_sessions(max_age=None):
     ensure_dirs()
     names = session_names()
     dirs = session_dirs()
+    hosts = session_hosts()
     out = []
     cutoff = None if max_age is None else now_ts() - max_age
     for name in os.listdir(sessions_dir()):
@@ -84,8 +85,12 @@ def read_sessions(max_age=None):
             continue
         if cutoff is not None and rec.get("ts", 0) < cutoff:
             continue
-        rec["name"] = names.get(str(rec.get("session_id")))
-        rec["dir"] = dirs.get(str(rec.get("session_id")))
+        sid = str(rec.get("session_id"))
+        rec["name"] = names.get(sid)
+        rec["dir"] = dirs.get(sid)
+        h = hosts.get(sid) or {}
+        rec["host"] = h.get("host")
+        rec["ref"] = h.get("ref")
         out.append(rec)
     return out
 
@@ -146,6 +151,36 @@ def set_session_dir(session_id, directory):
         json.dump(data, f, ensure_ascii=False)
 
 
+def hosts_path():
+    return os.path.join(home_dir(), "hosts.json")
+
+
+def session_hosts():
+    path = hosts_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_session_host(session_id, host, ref=None):
+    if not host and not ref:
+        return
+    ensure_dirs()
+    data = session_hosts()
+    cur = data.get(str(session_id)) or {}
+    new = {"host": host or cur.get("host"), "ref": ref or cur.get("ref")}
+    if cur == new:
+        return
+    data[str(session_id)] = new
+    with open(hosts_path(), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
 def touch(session_id, ts=None):
     """Refresh a session's timestamp without changing its state (heartbeat)."""
     path = _path(session_id)
@@ -183,6 +218,10 @@ def clear(session_id=None):
             os.remove(dirs_path())
         except OSError:
             pass
+        try:
+            os.remove(hosts_path())
+        except OSError:
+            pass
         return
     base = _path(session_id)
     for name in os.listdir(sessions_dir()):
@@ -199,6 +238,10 @@ def clear(session_id=None):
     if ddata.pop(str(session_id), None) is not None:
         with open(dirs_path(), "w", encoding="utf-8") as f:
             json.dump(ddata, f, ensure_ascii=False)
+    hdata = session_hosts()
+    if hdata.pop(str(session_id), None) is not None:
+        with open(hosts_path(), "w", encoding="utf-8") as f:
+            json.dump(hdata, f, ensure_ascii=False)
 
 
 def override_path():

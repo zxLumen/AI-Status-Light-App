@@ -45,6 +45,12 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 跳转目标改为**按会话宿主**:插件上报 `host`(iTerm/VS Code/OpenCode 桌面)与 `ref`,
+  修复"iTerm 里的 opencode 被跳到 VS Code";iTerm 用 `ref` 精确选中 tab,桌面版走深链
+- 事件转发**串行化** + `safeStringify` 加固 + 子进程 stderr 全量记录,
+  修复并发 hook 偶发丢事件导致的**卡 working**
+
+### Fixed
 - `question` 工具也会触发 `tool.execute.before`,导致等待期间被写成 **busy**;
   现在 `question` 的 tool.before/after 不转发 busy/working(等待一律 blocked,
   回答后由 question.replied 回到 working)

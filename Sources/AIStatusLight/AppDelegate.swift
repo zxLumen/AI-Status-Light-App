@@ -121,10 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             let trusted = WindowFocuser.isTrusted
             for rec in pending {
-                guard AppLauncher.targetBundleIds(for: rec.agent).contains(front) else { continue }
+                guard AppLauncher.targetBundleIds(for: rec.agent, host: rec.host).contains(front) else { continue }
                 var match = true
-                if let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId),
-                   !dir.isEmpty, trusted {
+                // Only VS Code window titles reliably contain the project folder.
+                if front.hasPrefix("com.microsoft.VSCode"), trusted,
+                   let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId), !dir.isEmpty {
                     let folder = (dir as NSString).lastPathComponent
                     match = !folder.isEmpty
                         && (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
@@ -136,11 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Precise "already looking at it" check (needs Accessibility).
-    private func preciselyFocused(agent: String, dir: String?) -> Bool {
+    private func preciselyFocused(agent: String, dir: String?, host: String?) -> Bool {
         guard WindowFocuser.isTrusted,
               let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-              AppLauncher.targetBundleIds(for: agent).contains(front),
-              let d = dir ?? nil, !d.isEmpty else { return false }
+              AppLauncher.targetBundleIds(for: agent, host: host).contains(front),
+              let d = dir, !d.isEmpty else { return false }
         let folder = (d as NSString).lastPathComponent
         guard !folder.isEmpty else { return false }
         return (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
@@ -186,13 +187,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let agent = top?.agent ?? ""
         let dir = top?.dir
         let sid = top?.sessionId
+        let host = top?.host
+        let ref = top?.ref
         let name = (top?.name?.isEmpty == false) ? top!.name! : agent
         let label = (mode == "blocked" && blockedCount > 1) ? "\(blockedCount) 个任务需要你"
                                                             : contract.label(shownMode)
         let detail = (top?.message?.isEmpty == false) ? top!.message : nil
         // Already looking at that window → acknowledge silently, no bubble.
         if shownMode == "success" || shownMode == "error",
-           let sid, preciselyFocused(agent: agent, dir: dir) {
+           let sid, preciselyFocused(agent: agent, dir: dir, host: host) {
             StateStore.markAcknowledged(sid)
             return
         }
@@ -205,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     canJump: AppLauncher.canJump(agent: agent),
                     duration: duration,
                     anchor: statusItemAnchor()) { [weak self] in
-            self?.jump(agent: agent, directory: dir, sessionId: sid)
+            self?.jump(agent: agent, directory: dir, sessionId: sid, host: host, ref: ref)
         }
     }
 
@@ -242,14 +245,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return win.convertToScreen(btn.convert(btn.bounds, to: nil))
     }
 
-    private func jump(agent: String, directory: String? = nil, sessionId: String? = nil) {
+    private func jump(agent: String, directory: String? = nil, sessionId: String? = nil,
+                      host: String? = nil, ref: String? = nil) {
         _ = WindowFocuser.ensureTrusted()
         // success/error stay until acknowledged here ("唤起"); capture state up front.
         let state = sessionId.flatMap { sid in allSessions.first { $0.sessionId == sid }?.state }
         // Resolve directory / run the VS Code CLI off the main thread so a slow
         // `code`/`sqlite3` can never freeze the menu bar.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let ok = AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId)
+            let ok = AppLauncher.activate(agent: agent, directory: directory, sessionId: sessionId,
+                                          host: host, ref: ref)
             if !ok {
                 DispatchQueue.main.async { self?.panel.show() }
             }
@@ -326,7 +331,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let item = NSMenuItem(title: "\(label) — \(rec.state)",
                                       action: #selector(jumpAgent(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = ["agent": rec.agent, "dir": rec.dir ?? "", "sid": rec.sessionId] as NSDictionary
+                item.representedObject = ["agent": rec.agent, "dir": rec.dir ?? "",
+                                          "sid": rec.sessionId, "host": rec.host ?? "",
+                                          "ref": rec.ref ?? ""] as NSDictionary
                 var title = line(color, "\(label) — \(rec.state)")
                 if !fresh {
                     let dim = NSMutableAttributedString(attributedString: title)
@@ -470,7 +477,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let agent = (info?["agent"] as? String) ?? ""
         let dir = (info?["dir"] as? String)
         let sid = (info?["sid"] as? String)
-        jump(agent: agent, directory: (dir?.isEmpty == false) ? dir : nil, sessionId: sid)
+        let host = (info?["host"] as? String)
+        let ref = (info?["ref"] as? String)
+        jump(agent: agent, directory: (dir?.isEmpty == false) ? dir : nil, sessionId: sid,
+             host: (host?.isEmpty == false) ? host : nil,
+             ref: (ref?.isEmpty == false) ? ref : nil)
     }
 
     @objc private func toggleBubble() {

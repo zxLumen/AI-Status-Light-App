@@ -58,7 +58,11 @@
 - 显示 **状态 + agent + 会话名**;若是工具在问你问题(如 opencode 的 `question`),还会显示**问题文本**
 - 停留 **8s** 后自动淡出(菜单「气泡停留」可选 2/4/8s)
 - **点击气泡 → 跳到对应任务窗口**
-  - opencode:按会话项目目录用 **VS Code CLI(`code <目录>`)精准聚焦对应窗口**,无需权限;失败再退回辅助功能标题匹配 / 激活整个应用
+  - opencode **按会话宿主**跳转(插件上报 `host`/`ref`,需重启 opencode 采集):
+    - **iTerm** → 用 `ref` 经 AppleScript **选中对应 tab**(首次弹"自动化"授权)
+    - **VS Code** → `code <项目目录>` 聚焦对应窗口(无需权限)
+    - **OpenCode 桌面版** → `opencode://open-project?directory=…` 打开/聚焦项目窗口
+    - 其它终端 → 激活该 App
   - cursor → Cursor;claude/codex 暂无映射(点击打开状态面板)
   - 项目目录优先取桥接采集,缺失时只读查询 opencode 数据库
 - **提示状态**可分别开关:需要你 / 完成 / 出错 / **中断**
