@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appLog("launch")
         appState = AppState(contract: contract)
         push.log = { [weak self] line in self?.appLog(line) }
+        installMainMenu()
 
         let env = ProcessInfo.processInfo.environment
         // The private priority API turned out unreliable on macOS 15 (it can place
@@ -712,6 +713,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         floating.setShell(!floating.settings.shell)
     }
 
+    /// A minimal main menu. macOS dispatches the standard ⌘V/⌘C/⌘X key
+    /// equivalents through the main menu's Edit items — with no main menu the
+    /// key equivalents are never handled, so text fields could not be pasted
+    /// into (e.g. the Bark key dialog).
+    private func installMainMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(withTitle: "隐藏 AI Status Light",
+                        action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "退出",
+                        action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let editItem = NSMenuItem()
+        main.addItem(editItem)
+        let edit = NSMenu(title: "编辑")
+        editItem.submenu = edit
+        edit.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        NSApp.mainMenu = main
+        dbg("main menu installed pasteKey=\(edit.item(withTitle: "粘贴")?.keyEquivalent ?? "-")")
+    }
+
     @objc private func toggleFloatingHoverFade() {
         floating.setHoverFade(!floating.settings.hoverFade)
     }
@@ -746,18 +780,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func pushSettings() {
         let cfg = PushConfig.load()
+        // Prefill from the clipboard when it already holds a Bark key/URL, so
+        // pasting is optional.
+        var prefill = cfg.url
+        if let clip = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !clip.contains("\n") {
+            let looksLikeKey = clip.lowercased().contains("day.app")
+                || (clip.count >= 16 && clip.count <= 40
+                    && clip.allSatisfy { $0.isLetter || $0.isNumber })
+            if looksLikeKey { prefill = clip }
+        }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Bark 推送设置"
-        alert.informativeText = "在 iPhone 的 Bark App 里复制 key,粘贴到下面。\n" +
+        alert.informativeText = "在 iPhone 的 Bark App 里复制 key,粘贴到下面(⌘V;已自动读取剪贴板)。\n" +
             "可填完整地址 https://api.day.app/<KEY>,也可只填 <KEY>。"
         alert.addButton(withTitle: "保存")
         alert.addButton(withTitle: "取消")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.stringValue = cfg.url
+        field.stringValue = prefill
         field.placeholderString = "https://api.day.app/<KEY>"
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
+        NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         var next = cfg
         next.url = PushConfig.normalizedURL(field.stringValue)

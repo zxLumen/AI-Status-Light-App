@@ -76,6 +76,11 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 推送设置对话框**无法粘贴**(⌘V 无反应):App 没有主菜单,而 macOS 只通过主菜单的
+  「编辑」项分发 ⌘V/⌘C/⌘X。现安装最小主菜单(含编辑项);设置框还会**自动读取剪贴板**
+  中的 Bark key/URL 作为预填,粘贴变成可选
+
+### Fixed
 - **iTerm 里切到 opencode 的 tab 不清除 success**:插件上报的 `ITERM_SESSION_ID` 是
   `w0t0p0:<UUID>`,而 AppleScript 的 `unique id` 是裸 `<UUID>`,全等比较永远失败。
   新增 `ITermFocus.normalize`(取尾部 UUID)后比较;`focus()` 同样按归一化匹配并
