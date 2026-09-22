@@ -98,13 +98,34 @@ enum ITermFocus {
           end repeat
         end tell
         """
+        return run(script) != nil
+    }
+
+    /// The unique id of iTerm2's current (frontmost) session, for verifying
+    /// whether the user is actually looking at a given session's tab.
+    static func currentSessionRef() -> String? {
+        let script = """
+        tell application "iTerm2"
+          tell current window to tell current tab to tell current session to return unique id
+        end tell
+        """
+        guard let out = run(script, capture: true) else { return nil }
+        let s = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
+    }
+
+    @discardableResult
+    private static func run(_ script: String, capture: Bool = false) -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", script]
-        p.standardOutput = Pipe()
+        let out = Pipe()
+        p.standardOutput = out
         p.standardError = Pipe()
-        do { try p.run() } catch { return false }
+        do { try p.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return p.terminationStatus == 0
+        guard p.terminationStatus == 0 else { return nil }
+        return capture ? String(data: data, encoding: .utf8) : ""
     }
 }
