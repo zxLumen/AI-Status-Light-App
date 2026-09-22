@@ -50,6 +50,10 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 同一 App 下多个 success,切一个却全被确认变 idle:按 App 兜底会清掉该 App 下**所有**会话。
+  现**仅当该 App 下只有 1 个待确认会话**才兜底;≥2 个必须精确匹配(读不到则不确认)。
+
+### Fixed
 - 悬浮灯 success 一闪而过:每轮 poll 的 `AppState.update` 把 `mode` 设回聚合(最高优先级),
   而 `applyDisplay` 提前返回未纠正 → 悬浮灯被按回 busy。现 `update` 不再设置 `mode`,
   由显示逻辑(轮播)独占

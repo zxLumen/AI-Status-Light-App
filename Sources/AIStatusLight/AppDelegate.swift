@@ -215,28 +215,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if self.lastFrontKey == nil { self.lastFrontKey = key; return }  // prime, don't ack
             guard key != self.lastFrontKey else { return }                   // no transition
             self.lastFrontKey = key
+
+            let matching = pending.filter {
+                AppLauncher.targetBundleIds(for: $0.agent, host: $0.host).contains(front)
+            }
+            guard !matching.isEmpty else { return }
             let trusted = WindowFocuser.isTrusted
-            for rec in pending {
-                let ids = AppLauncher.targetBundleIds(for: rec.agent, host: rec.host)
-                guard ids.contains(front) else { continue }
+            for rec in matching {
                 var verified = false
+                var why = ""
                 if front.hasPrefix("com.microsoft.VSCode") {
                     if trusted, let title = WindowFocuser.focusedWindowTitle(bundleId: front),
                        let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId), !dir.isEmpty {
                         let folder = (dir as NSString).lastPathComponent
                         verified = !folder.isEmpty && title.localizedCaseInsensitiveContains(folder)
+                        why = "title=\"\(title)\" folder=\"\(folder)\""
                     } else {
-                        verified = true   // can't read the window → app-level
+                        // Ambiguous: only clear when this is the app's sole pending session.
+                        verified = matching.count == 1
+                        why = "app-level trusted=\(trusted) matching=\(matching.count) dir=\(rec.dir ?? "-")"
                     }
                 } else if front == "com.googlecode.iterm2" {
                     if let r = rec.ref, !r.isEmpty, let cur = ITermFocus.currentSessionRef() {
                         verified = (cur == r)
+                        why = "ref cur=\(cur) want=\(r)"
                     } else {
-                        verified = true   // no Automation/ref → app-level
+                        verified = matching.count == 1
+                        why = "app-level ref=\(rec.ref ?? "-") matching=\(matching.count)"
                     }
-                } else if front == "ai.opencode.desktop" {
-                    verified = true
+                } else {
+                    verified = matching.count == 1
+                    why = "app-level matching=\(matching.count)"
                 }
+                self.appLog("ack? \(rec.sessionId) verified=\(verified) \(why)")
                 if verified {
                     self.appLog("ack \(rec.sessionId) state=\(rec.state) host=\(rec.host ?? "-") via=\(front)")
                     StateStore.markAcknowledged(rec.sessionId)
