@@ -469,9 +469,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let login = action("开机自启", #selector(toggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
-        if !WindowFocuser.isTrusted {
-            menu.addItem(action("授予辅助功能权限(精准跳窗口)", #selector(openAccessibility)))
-        }
+        let axTitle = WindowFocuser.isTrusted ? "辅助功能:已授权" : "辅助功能:未授权(点此授权)"
+        menu.addItem(action(axTitle, #selector(openAccessibility)))
 
         menu.addItem(.separator())
         let fl = action("显示悬浮灯", #selector(toggleFloating))

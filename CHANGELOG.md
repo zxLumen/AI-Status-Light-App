@@ -25,6 +25,11 @@
 - 已完成且在看的窗口:不再弹 success/error 气泡
 
 ### Changed
+- **改用稳定签名**:`bundle.sh` 优先使用本机 codesigning 证书(Apple Development),
+  替代 ad-hoc 签名,使 macOS TCC(辅助功能/自动化)授权在重建后不再失效
+- 菜单新增「辅助功能:已授权 / 未授权」状态行(点击去授权)
+
+### Changed
 - 优先级调整为 `blocked > error > busy > working > thinking > success > idle`:
   有人在干活时显示黄灯,不再被常驻的 success 绿灯压住
 
