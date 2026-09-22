@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var panel: PanelController!
     private var floating: FloatingLightController!
     private let bubble = BubbleController()
-    private var prevMode: String?
+    private var prevStates: [String: String] = [:]
     private var lastBubbleAt = Date.distantPast
     private var interruptNotified: Set<String> = []
     private var errorTimes: [Date] = []
@@ -276,53 +276,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Show a menu bar bubble when the aggregate settles into a key state.
     private func maybeBubble() {
-        let mode = last.mode
-        defer { prevMode = mode }
-        guard let prev = prevMode, mode != prev else { return }
-        guard ["blocked", "success", "error"].contains(mode) else { return }
+        // Fire per *session* state change (not the aggregate mode): with several
+        // concurrent sessions the aggregate is often a higher-priority state, so
+        // a finishing session would otherwise never bubble.
+        var candidates: [SessionRecord] = []
+        let now = Date().timeIntervalSince1970
+        for rec in allSessions where rec.ack != true && now - rec.ts <= contract.ttl(rec.state) {
+            if let prev = prevStates[rec.sessionId], prev != rec.state,
+               ["success", "error", "blocked"].contains(rec.state) {
+                candidates.append(rec)
+            }
+        }
+        prevStates = Dictionary(allSessions.map { ($0.sessionId, $0.state) }, uniquingKeysWith: { a, _ in a })
+        guard let top = candidates.max(by: { contract.priorityOf($0.state) < contract.priorityOf($1.state) })
+        else { return }
+
         let d = UserDefaults.standard
         guard d.object(forKey: "ui.bubble") as? Bool ?? true else { return }
         guard Date().timeIntervalSince(lastBubbleAt) > 3 else { return }
 
-        // Error escalation: repeated failures turn into an alarm.
-        var shownMode = mode
-        if mode == "error", bubbleEnabled("error") {
-            let now = Date()
-            errorTimes.append(now)
-            errorTimes = errorTimes.filter { now.timeIntervalSince($0) < 120 }
-            if errorTimes.count >= 2, now.timeIntervalSince(alarmAt) > 30 {
-                alarmAt = now
-                shownMode = "alarm"
+        var shownState = top.state
+        if top.state == "error", bubbleEnabled("error") {
+            let nowD = Date()
+            errorTimes.append(nowD)
+            errorTimes = errorTimes.filter { nowD.timeIntervalSince($0) < 120 }
+            if errorTimes.count >= 2, nowD.timeIntervalSince(alarmAt) > 30 {
+                alarmAt = nowD
+                shownState = "alarm"
                 StateStore.setOverride(mode: "alarm", ttl: 30)   // escalate the light too
             }
         }
-        let key = shownMode == "alarm" ? "error" : mode
+        let key = shownState == "alarm" ? "error" : top.state
         guard bubbleEnabled(key) else { return }
         lastBubbleAt = Date()
 
-        // Merge multiple "needs you" sessions into one bubble.
-        let live = last.sessions.filter { Date().timeIntervalSince1970 - $0.ts <= contract.ttl($0.state) }
-        let blockedCount = live.filter { $0.state == "blocked" }.count
-        let top = live.max { contract.priorityOf($0.state) < contract.priorityOf($1.state) }
-        let agent = top?.agent ?? ""
-        let dir = top?.dir
-        let sid = top?.sessionId
-        let host = top?.host
-        let ref = top?.ref
-        let name = (top?.name?.isEmpty == false) ? top!.name! : agent
-        let label = (mode == "blocked" && blockedCount > 1) ? "\(blockedCount) 个任务需要你"
-                                                            : contract.label(shownMode)
-        let detail = (top?.message?.isEmpty == false) ? top!.message : nil
+        let blockedCount = allSessions.filter {
+            $0.state == "blocked" && $0.ack != true && now - $0.ts <= contract.ttl($0.state)
+        }.count
+        let name = (top.name?.isEmpty == false) ? top.name! : top.agent
+        let label = (top.state == "blocked" && blockedCount > 1)
+            ? "\(blockedCount) 个任务需要你"
+            : contract.label(shownState)
+        let detail = (top.message?.isEmpty == false) ? top.message : nil
         let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
+        dbg("bubble \(shownState) session=\(name)")
         bubble.show(label: label,
-                    colorHex: contract.colorHex(shownMode),
+                    colorHex: contract.colorHex(shownState),
                     session: name,
-                    agent: agent,
+                    agent: top.agent,
                     detail: detail,
-                    canJump: AppLauncher.canJump(agent: agent),
+                    canJump: AppLauncher.canJump(agent: top.agent),
                     duration: duration,
                     anchor: statusItemAnchor()) { [weak self] in
-            self?.jump(agent: agent, directory: dir, sessionId: sid, host: host, ref: ref)
+            self?.jump(agent: top.agent, directory: top.dir, sessionId: top.sessionId,
+                       host: top.host, ref: top.ref)
         }
     }
 
