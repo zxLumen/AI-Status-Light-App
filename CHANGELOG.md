@@ -60,6 +60,14 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 滑动**滑一半卡住**:`hitTest` 只认随 `offset` 移动的卡片矩形,卡片滑离静止的光标后
+  panel 收不到 `scrollWheel`,手势中断。改为手势期间 `capturing` 覆盖整个 bounds,
+  结束后恢复仅卡片可点;`followLimit 45→90`、`margin 60→140`,跟手更明显
+- 滑动语义改为**滑动即关闭**(累计 ≥20pt 即甩出,只对 <20pt 抖动回弹)
+- 手势后**悬停不再起作用**:新增 `hoverMuted`,滑动/拖拽一开始即置位,
+  回弹后也恢复计时,修复"回弹后赖着不走"
+
+### Fixed
 - 气泡滑动**不跟手、甩出掉帧**:改为 `BubbleModel`(ObservableObject)驱动 SwiftUI
   `offset/opacity`,滑动按 0.45 比例实时跟手(限 ±45pt),甩出走 GPU 动画,
   不再动画窗口 frame;面板加 60pt 透明边距并限制命中区域(边距不拦截点击)

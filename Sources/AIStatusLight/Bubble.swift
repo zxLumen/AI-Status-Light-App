@@ -106,8 +106,13 @@ final class BubbleContainerView: FirstMouseView {
     var onScrollSettled: ((CGFloat) -> Void)?
     private var accum: CGFloat = 0
     private var settle: Timer?
+    private var capturing = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // While a swipe is in progress keep receiving events even if the card
+        // has slid out from under the pointer; otherwise only the card is
+        // clickable so the transparent margins don't swallow clicks.
+        if capturing { return super.hitTest(point) }
         let p = convert(point, from: superview)
         var r = bounds.insetBy(dx: margin, dy: 0)
         r.origin.x += offsetProvider()
@@ -122,6 +127,7 @@ final class BubbleContainerView: FirstMouseView {
             super.scrollWheel(with: event)     // let vertical scroll through
             return
         }
+        capturing = true
         accum += dx
         onScrollChanged?(accum)
         settle?.invalidate()
@@ -129,6 +135,7 @@ final class BubbleContainerView: FirstMouseView {
             guard let self else { return }
             let total = self.accum
             self.accum = 0
+            self.capturing = false
             self.onScrollSettled?(total)
         }
         RunLoop.main.add(t, forMode: .common)
@@ -144,14 +151,15 @@ final class BubbleController {
     private var autoHide: Double = 8
     private var dragging = false
     private var hovering = false
+    private var hoverMuted = false      // set once a gesture starts: hover no longer matters
     private var cardWidth: CGFloat = 270
     private var showToken = 0
 
-    private static let swipeDistance: CGFloat = 60    // two-finger swipe
+    private static let swipeMin: CGFloat = 20         // ignore sub-pixel jitter
     private static let dragDistance: CGFloat = 80     // mouse drag
-    private static let margin: CGFloat = 60           // transparent side padding
-    private static let followRatio: CGFloat = 0.45    // live-follow while swiping
-    private static let followLimit: CGFloat = 45
+    private static let margin: CGFloat = 140          // transparent side padding
+    private static let followRatio: CGFloat = 0.5     // live-follow while swiping
+    private static let followLimit: CGFloat = 90
 
     func show(label: String, colorHex: String, session: String, agent: String,
               detail: String? = nil, canJump: Bool, duration: Double, anchor: NSRect?,
@@ -162,6 +170,7 @@ final class BubbleController {
         self.autoHide = max(1, duration)
         self.dragging = false
         self.hovering = false
+        self.hoverMuted = false
 
         let model = BubbleModel()
         self.model = model
@@ -173,7 +182,7 @@ final class BubbleController {
                               },
                               onClose: { [weak self] in self?.dismiss() },
                               onHoverChange: { [weak self] inside in
-                                  guard let self else { return }
+                                  guard let self, !self.hoverMuted else { return }
                                   self.hovering = inside
                                   if inside {
                                       self.pauseAutoHide()
@@ -184,6 +193,7 @@ final class BubbleController {
                               onDragChanged: { [weak self] dx in
                                   guard let self else { return }
                                   self.dragging = true
+                                  self.hoverMuted = true
                                   self.pauseAutoHide()
                                   self.model?.offset = dx        // 1:1 follow
                               },
@@ -194,7 +204,7 @@ final class BubbleController {
                                   if abs(dx) > Self.dragDistance || abs(predicted) > Self.dragDistance * 2 {
                                       self.fling(direction: signed < 0 ? -1 : 1)
                                   } else {
-                                      self.snapBack(resume: !self.hovering)
+                                      self.snapBack()
                                   }
                               })
         let host = NSHostingView(rootView: view)
@@ -217,16 +227,18 @@ final class BubbleController {
         container.offsetProvider = { [weak model] in model?.offset ?? 0 }
         container.onScrollChanged = { [weak self] accum in
             guard let self else { return }
+            self.hoverMuted = true          // a swipe makes hover irrelevant
             self.pauseAutoHide()
             let v = max(-Self.followLimit, min(Self.followLimit, accum * Self.followRatio))
             self.model?.offset = v
         }
         container.onScrollSettled = { [weak self] total in
             guard let self else { return }
-            if abs(total) > Self.swipeDistance {
+            // Any deliberate swipe dismisses; only sub-pixel jitter snaps back.
+            if abs(total) >= Self.swipeMin {
                 self.fling(direction: total < 0 ? -1 : 1)
             } else {
-                self.snapBack(resume: !self.hovering)
+                self.snapBack()
             }
         }
         host.frame = container.bounds
@@ -266,6 +278,7 @@ final class BubbleController {
         onClick = nil
         dragging = false
         hovering = false
+        hoverMuted = false
         guard let model, let panel else { return }
         self.panel = nil
         self.model = nil
@@ -286,10 +299,10 @@ final class BubbleController {
 
     private func fling(direction: CGFloat) { finish(direction: direction) }
 
-    private func snapBack(resume: Bool) {
+    private func snapBack() {
         guard let model else { return }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { model.offset = 0 }
-        if resume { resumeAutoHide() }
+        resumeAutoHide()
     }
 
     private func pauseAutoHide() {
