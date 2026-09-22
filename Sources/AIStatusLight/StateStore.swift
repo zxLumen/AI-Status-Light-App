@@ -48,18 +48,43 @@ enum StateStore {
         return map
     }
 
+    static var dirsPath: URL { home.appendingPathComponent("dirs.json") }
+    static var hostsPath: URL { home.appendingPathComponent("hosts.json") }
+
+    static func dirs() -> [String: String] {
+        guard let data = try? Data(contentsOf: dirsPath),
+              let map = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return map
+    }
+
+    struct HostInfo: Decodable {
+        let host: String?
+        let ref: String?
+    }
+
+    static func hosts() -> [String: HostInfo] {
+        guard let data = try? Data(contentsOf: hostsPath),
+              let map = try? JSONDecoder().decode([String: HostInfo].self, from: data) else { return [:] }
+        return map
+    }
+
     static func readSessions() -> [SessionRecord] {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil) else {
             return []
         }
         let names = names()
+        let dirs = dirs()
+        let hosts = hosts()
         var out: [SessionRecord] = []
         let decoder = JSONDecoder()
         for url in items where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   var rec = try? decoder.decode(SessionRecord.self, from: data) else { continue }
             rec.name = names[rec.sessionId]
+            if rec.dir == nil { rec.dir = dirs[rec.sessionId] }
+            rec.host = hosts[rec.sessionId]?.host
+            rec.ref = hosts[rec.sessionId]?.ref
             out.append(rec)
         }
         return out

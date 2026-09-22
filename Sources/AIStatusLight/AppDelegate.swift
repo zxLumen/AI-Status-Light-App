@@ -250,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = WindowFocuser.ensureTrusted()
         // success/error stay until acknowledged here ("唤起"); capture state up front.
         let state = sessionId.flatMap { sid in allSessions.first { $0.sessionId == sid }?.state }
+        appLog("jump agent=\(agent) host=\(host ?? "-") ref=\(ref ?? "-") dir=\(directory ?? "-")")
         // Resolve directory / run the VS Code CLI off the main thread so a slow
         // `code`/`sqlite3` can never freeze the menu bar.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
