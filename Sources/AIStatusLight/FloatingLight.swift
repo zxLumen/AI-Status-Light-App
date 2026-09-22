@@ -10,6 +10,21 @@ final class FloatingSettings: ObservableObject {
     @Published var allScreens: Bool { didSet { d.set(allScreens, forKey: "floating.allScreens") } }
     @Published var opacity: Double { didSet { d.set(opacity, forKey: "floating.opacity") } }
     @Published var shell: Bool { didSet { d.set(shell, forKey: "floating.shell") } }
+    @Published var hoverFade: Bool { didSet { d.set(hoverFade, forKey: "floating.hoverFade") } }
+    @Published var hoverOpacity: Double { didSet { d.set(hoverOpacity, forKey: "floating.hoverOpacity") } }
+    @Published var hovered: Bool = false          // transient: cursor over the light
+
+    /// Opacity actually rendered: the base setting, faded out while the cursor
+    /// is over the light (when "hover to fade" is enabled).
+    var renderOpacity: Double {
+        FloatingSettings.effectiveOpacity(base: opacity, hovered: hovered,
+                                          hoverFade: hoverFade, hoverOpacity: hoverOpacity)
+    }
+
+    static func effectiveOpacity(base: Double, hovered: Bool,
+                                 hoverFade: Bool, hoverOpacity: Double) -> Double {
+        base * (hovered && hoverFade ? hoverOpacity : 1)
+    }
 
     init() {
         visible = d.object(forKey: "floating.visible") as? Bool ?? true
@@ -17,6 +32,8 @@ final class FloatingSettings: ObservableObject {
         allScreens = d.object(forKey: "floating.allScreens") as? Bool ?? false
         opacity = d.object(forKey: "floating.opacity") as? Double ?? 1.0
         shell = d.object(forKey: "floating.shell") as? Bool ?? false
+        hoverFade = d.object(forKey: "floating.hoverFade") as? Bool ?? true
+        hoverOpacity = d.object(forKey: "floating.hoverOpacity") as? Double ?? 0.15
     }
 }
 
@@ -53,7 +70,8 @@ struct FloatingLamps: View {
             }
             .frame(width: w, height: h)
         }
-        .opacity(settings.opacity)
+        .opacity(settings.renderOpacity)
+        .animation(.easeInOut(duration: 0.12), value: settings.hovered)
         .allowsHitTesting(false)
     }
 
@@ -128,6 +146,7 @@ final class FloatingRootView: NSView {
     var onTogglePin: (() -> Void)?
     var onClose: (() -> Void)?
     var onOpacityDelta: ((CGFloat) -> Void)?
+    var onHoverChange: ((Bool) -> Void)?
     var aspectRatio: CGFloat?          // when set, resize is locked to this w/h
     private(set) var pinned = false
 
@@ -197,6 +216,7 @@ final class FloatingRootView: NSView {
         pinned = p
         panel?.ignoresMouseEvents = p
         panel?.isMovableByWindowBackground = !p
+        if hovering { onHoverChange?(false) }
         hovering = false
         controls.isHidden = true
         updatePinImage()
@@ -211,11 +231,13 @@ final class FloatingRootView: NSView {
     override func mouseEntered(with event: NSEvent) {
         hovering = true
         if !pinned { controls.isHidden = false }
+        onHoverChange?(true)
         needsDisplay = true
     }
     override func mouseExited(with event: NSEvent) {
         hovering = false
         controls.isHidden = true
+        onHoverChange?(false)
         needsDisplay = true
     }
 
@@ -293,6 +315,7 @@ final class FloatingLightController: NSObject, ObservableObject {
     let settings = FloatingSettings()
     private let state: AppState
     private var panels: [FloatingPanel] = []
+    private var globalMonitor: Any?
 
     init(state: AppState) {
         self.state = state
@@ -312,6 +335,8 @@ final class FloatingLightController: NSObject, ObservableObject {
     func setAllScreens(_ on: Bool) { settings.allScreens = on; sync() }
     func setOpacity(_ v: Double) { settings.opacity = min(1, max(0.2, v)) }
     func setShell(_ on: Bool) { settings.shell = on; sync() }
+    func setHoverFade(_ on: Bool) { settings.hoverFade = on; sync() }
+    func setHoverOpacity(_ v: Double) { settings.hoverOpacity = min(1, max(0, v)) }
 
     func sync() {
         if !settings.visible { tearDown(); return }
@@ -337,9 +362,42 @@ final class FloatingLightController: NSObject, ObservableObject {
             }
             p.orderFrontRegardless()
         }
+        updateHoverMonitor()
+    }
+
+    /// While pinned the panel ignores mouse events, so `mouseEntered/Exited`
+    /// never fire — watch the cursor globally and fade the light when it is
+    /// over one of the panels.
+    private func updateHoverMonitor() {
+        let need = settings.visible && settings.pinned && settings.hoverFade && !panels.isEmpty
+        if need, globalMonitor == nil {
+            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+                self?.evaluateHover()
+            }
+        } else if !need, let m = globalMonitor {
+            NSEvent.removeMonitor(m)
+            globalMonitor = nil
+            setHovered(false)
+        }
+    }
+
+    private func evaluateHover() {
+        let p = NSEvent.mouseLocation
+        let inside = panels.contains { $0.frame.contains(p) }
+        if inside != settings.hovered { setHovered(inside) }
+    }
+
+    private func setHovered(_ v: Bool) {
+        guard settings.hovered != v else { return }
+        if ProcessInfo.processInfo.environment["AISTATUS_DEBUG"] != nil {
+            FileHandle.standardError.write("floating hover=\(v) pinned=\(settings.pinned)\n".data(using: .utf8)!)
+        }
+        withAnimation(.easeInOut(duration: 0.12)) { settings.hovered = v }
     }
 
     private func tearDown() {
+        if let m = globalMonitor { NSEvent.removeMonitor(m); globalMonitor = nil }
+        setHovered(false)
         for p in panels { p.orderOut(nil); p.close() }
         panels.removeAll()
     }
@@ -377,6 +435,7 @@ final class FloatingLightController: NSObject, ObservableObject {
             guard let self else { return }
             self.settings.opacity = min(1, max(0.2, self.settings.opacity + Double(d) * 0.02))
         }
+        root.onHoverChange = { [weak self] inside in self?.setHovered(inside) }
         root.setPinned(settings.pinned)
         panel.contentView = root
 

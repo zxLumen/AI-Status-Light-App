@@ -493,6 +493,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let sh = action("悬浮圆角外壳", #selector(toggleFloatingShell))
         sh.state = floating.settings.shell ? .on : .off
         menu.addItem(sh)
+        let hf = action("悬停变透明", #selector(toggleFloatingHoverFade))
+        hf.state = floating.settings.hoverFade ? .on : .off
+        menu.addItem(hf)
+        let hoSub = NSMenu()
+        for pct in [0, 15, 30] {
+            let it = NSMenuItem(title: "\(pct)%", action: #selector(setFloatingHoverOpacity(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = pct
+            it.state = abs(floating.settings.hoverOpacity * 100 - Double(pct)) < 2 ? .on : .off
+            hoSub.addItem(it)
+        }
+        let hoItem = NSMenuItem(title: "悬停透明度", action: nil, keyEquivalent: "")
+        hoItem.submenu = hoSub
+        menu.addItem(hoItem)
         let sub = NSMenu()
         let onlyMain = NSMenuItem(title: "仅主屏", action: #selector(showMainScreenOnly), keyEquivalent: "")
         onlyMain.target = self
@@ -650,6 +664,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleFloatingShell() {
         floating.setShell(!floating.settings.shell)
+    }
+
+    @objc private func toggleFloatingHoverFade() {
+        floating.setHoverFade(!floating.settings.hoverFade)
+    }
+
+    @objc private func setFloatingHoverOpacity(_ sender: NSMenuItem) {
+        floating.setHoverOpacity(Double(sender.tag) / 100.0)
     }
 
     @objc private func showMainScreenOnly() {
