@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var panel: PanelController!
     private var floating: FloatingLightController!
     private let bubble = BubbleController()
+    private let push = PushNotifier()
     private var prevStates: [String: String] = [:]
     private var lastBubbleAt = Date.distantPast
     private var interruptNotified: Set<String> = []
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         appLog("launch")
         appState = AppState(contract: contract)
+        push.log = { [weak self] line in self?.appLog(line) }
 
         let env = ProcessInfo.processInfo.environment
         // The private priority API turned out unreliable on macOS 15 (it can place
@@ -199,7 +201,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         trackInterrupts(records)
         pollTick &+= 1
         if pollTick % 4 == 0 { acknowledgeFocused() }
-        maybeBubble()
+        let transitions = stateTransitions()
+        maybeBubble(transitions)
+        maybePush(transitions)
     }
 
     /// Clear a finished/failed session once its window is brought to the front.
@@ -278,11 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.object(forKey: "ui.bubble.\(key)") as? Bool ?? (key != "interrupt")
     }
 
-    /// Show a menu bar bubble when the aggregate settles into a key state.
-    private func maybeBubble() {
-        // Fire per *session* state change (not the aggregate mode): with several
-        // concurrent sessions the aggregate is often a higher-priority state, so
-        // a finishing session would otherwise never bubble.
+    /// Sessions that just changed into a key state (needs-you / done / error).
+    /// Fired per *session* (not the aggregate mode): with several concurrent
+    /// sessions the aggregate is often a higher-priority state, so a finishing
+    /// session would otherwise never be noticed. Also advances `prevStates`.
+    private func stateTransitions() -> [SessionRecord] {
         var candidates: [SessionRecord] = []
         let now = Date().timeIntervalSince1970
         for rec in allSessions where rec.ack != true && now - rec.ts <= contract.ttl(rec.state) {
@@ -292,6 +296,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         prevStates = Dictionary(allSessions.map { ($0.sessionId, $0.state) }, uniquingKeysWith: { a, _ in a })
+        return candidates
+    }
+
+    /// Push the most urgent transition to the phone/watch (respects its own
+    /// toggles and cooldown, independent of the bubble settings).
+    private func maybePush(_ transitions: [SessionRecord]) {
+        guard !transitions.isEmpty, push.isEnabled else { return }
+        let badge = allSessions.filter { $0.ack != true && ($0.state == "blocked" || $0.state == "error") }.count
+        for rec in push.maybeNotify(transitions, badge: badge) {
+            appLog("push \(rec.state) sid=\(rec.sessionId) name=\(rec.name ?? rec.agent)")
+        }
+    }
+
+    /// Show a menu bar bubble when the aggregate settles into a key state.
+    private func maybeBubble(_ candidates: [SessionRecord]) {
         guard let top = candidates.max(by: { contract.priorityOf($0.state) < contract.priorityOf($1.state) })
         else { return }
 
@@ -315,7 +334,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastBubbleAt = Date()
 
         let blockedCount = allSessions.filter {
-            $0.state == "blocked" && $0.ack != true && now - $0.ts <= contract.ttl($0.state)
+            $0.state == "blocked" && $0.ack != true
+                && Date().timeIntervalSince1970 - $0.ts <= contract.ttl($0.state)
         }.count
         let name = (top.name?.isEmpty == false) ? top.name! : top.agent
         let label = (top.state == "blocked" && blockedCount > 1)
@@ -567,6 +587,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(ack)
 
         menu.addItem(.separator())
+        let pushCfg = PushConfig.load()
+        let pushSub = NSMenu()
+        let pe = NSMenuItem(title: "启用手机推送", action: #selector(togglePushEnabled), keyEquivalent: "")
+        pe.target = self
+        pe.state = pushCfg.enabled ? .on : .off
+        pushSub.addItem(pe)
+        let pt = NSMenuItem(title: "测试推送", action: #selector(testPush), keyEquivalent: "")
+        pt.target = self
+        pushSub.addItem(pt)
+        pushSub.addItem(.separator())
+        for (title, key) in [("需要你", "blocked"), ("完成", "success"), ("出错", "error")] {
+            let it = NSMenuItem(title: title, action: #selector(togglePushState(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = key
+            it.state = (pushCfg.states[key] ?? false) ? .on : .off
+            pushSub.addItem(it)
+        }
+        pushSub.addItem(.separator())
+        let ps = NSMenuItem(title: "设置 Bark…", action: #selector(pushSettings), keyEquivalent: "")
+        ps.target = self
+        pushSub.addItem(ps)
+        let pushItem = NSMenuItem(title: "手机推送", action: nil, keyEquivalent: "")
+        pushItem.submenu = pushSub
+        menu.addItem(pushItem)
+
+        menu.addItem(.separator())
         menu.addItem(action("退出", #selector(quit), key: "q"))
     }
 
@@ -672,6 +718,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setFloatingHoverOpacity(_ sender: NSMenuItem) {
         floating.setHoverOpacity(Double(sender.tag) / 100.0)
+    }
+
+    // MARK: - Phone / watch push (Bark)
+
+    @objc private func togglePushEnabled() {
+        var cfg = PushConfig.load()
+        cfg.enabled.toggle()
+        cfg.save()
+        push.reload()
+        if cfg.enabled && cfg.url.isEmpty { pushSettings() }
+    }
+
+    @objc private func togglePushState(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        var cfg = PushConfig.load()
+        cfg.states[key] = !(cfg.states[key] ?? false)
+        cfg.save()
+        push.reload()
+    }
+
+    @objc private func testPush() {
+        push.reload()
+        guard !PushConfig.load().url.isEmpty else { pushSettings(); return }
+        push.sendTest()
+    }
+
+    @objc private func pushSettings() {
+        let cfg = PushConfig.load()
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Bark 推送设置"
+        alert.informativeText = "在 iPhone 的 Bark App 里复制 key,粘贴到下面。\n" +
+            "可填完整地址 https://api.day.app/<KEY>,也可只填 <KEY>。"
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = cfg.url
+        field.placeholderString = "https://api.day.app/<KEY>"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var next = cfg
+        next.url = PushConfig.normalizedURL(field.stringValue)
+        guard !next.url.isEmpty else { return }
+        next.enabled = true
+        next.save()
+        push.reload()
+        appLog("push settings saved host=\(URL(string: next.url)?.host ?? "-")")
+        push.sendTest()
     }
 
     @objc private func showMainScreenOnly() {

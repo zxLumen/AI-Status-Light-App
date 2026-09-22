@@ -6,6 +6,15 @@
 ## [Unreleased]
 
 ### Added
+- **手机 / 手表推送(Bark)**:任务进入 需要你 / 完成 / 出错 时推到 iPhone,
+  再由 iOS 通知镜像到手表。新增 `Push.swift`(`PushConfig` + `PushNotifier`):
+  - 配置 `~/.ai-status-light/push.json`(密钥只在此,不进仓库;日志只记主机名)
+  - 分状态开关;需要你用 `timeSensitive`,完成/出错用 `active`
+  - 每会话每状态冷却去重(默认 60s)、`group`=会话 id、`badge`=待处理数
+  - 菜单「手机推送」:启用 / 测试推送 / 分状态开关 / 设置 Bark…(输入 key 自动发测试)
+- 跃变检测抽为 `stateTransitions()`,气泡与推送各用其开关独立消费
+
+### Added
 - 悬浮灯**悬停变透明**:光标移到红绿灯上时淡出到设定值(默认 15%,菜单可切 0%/15%/30%),
   移开即恢复;`FloatingSettings.effectiveOpacity` 计算显示不透明度,0.12s 缓动
 - **固定(点击穿透)状态也能淡化**:固定时面板 `ignoresMouseEvents` 收不到鼠标事件,

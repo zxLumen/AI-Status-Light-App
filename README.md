@@ -17,7 +17,8 @@
 - **多会话轮播**:同时有多个不同状态的会话时,图标与悬浮灯按**优先级轮流展示**各状态
   (blocked/error 停留更久);只有一个状态时静止
 - **状态变化气泡**:任务进入 需要你 / 完成 / 出错 时,菜单栏图标下方弹出气泡;**点击跳转到任务 App**
-- **悬浮红绿灯**(菜单开关):透明无底、置顶、跨所有 Space/全屏;可拖动、可缩放、可固定
+- **悬浮红绿灯**(菜单开关):透明无底、置顶、跨所有 Space/全屏;可拖动、可缩放、可固定;**鼠标悬停时自动变透明**
+- **手机 / 手表推送**(菜单开关):需要你 / 完成 / 出错 时经 **Bark** 推到 iPhone,并由 iOS 通知镜像到智能手表
 - 图标位置用 `autosaveName` 持久化(`⌘` 拖拽后记住)
 - 无 Dock 图标(`LSUIElement`),纯菜单栏常驻
 
@@ -73,13 +74,38 @@
   - 出错**反复出现**(120s 内 ≥2 次)会**升级为 alarm**:气泡变 alarm 样式,并把灯短暂切到 alarm(30s)
 - 菜单「状态变化气泡」为总开关;气泡消失后,也可从**下拉菜单点击会话行**跳转
 
+## 手机 / 手表推送
+
+任务进入 **需要你 / 完成 / 出错** 时,把通知推到 iPhone,再由 iOS 通知镜像到智能手表。
+
+```
+macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(ANCS)──▶ 手表
+```
+
+用 **Bark**(iPhone 免费 App,开源,可自建):
+
+1. iPhone 安装 **Bark**,打开 → 复制 key(其 URL 尾部那串)
+2. 菜单 **手机推送 → 设置 Bark…** → 粘贴完整地址 `https://api.day.app/<KEY>` 或只填 `<KEY>` → 保存
+3. 保存后会自动发一条**测试推送**;手机收到即成功(手表需在 Garmin/其它手表 App 里允许转发该 App 的通知)
+
+细节:
+
+- **分状态开关**:需要你 / 完成 / 出错(菜单「手机推送」)
+- **提醒强度**:需要你用 `timeSensitive`(可穿透专注模式,但**不绕过静音**);完成/出错用 `active`
+  - 想更强:在 iOS「设置 → 通知 → Bark → 关键警报」开启后,把 `~/.ai-status-light/push.json` 的 `level` 改为 `critical`(可绕过静音/勿扰)
+  - `timeSensitive` **仍会进通知中心并带角标**,只是"何时打扰你"更强制
+- **去重**:同一会话同一状态 `cooldown` 秒内只推一次(默认 60s),防止 error 升级刷屏
+- **角标** = 待处理的 需要你/出错 会话数;**分组** = 会话 id(iOS 上同会话通知折叠)
+- 配置存在 `~/.ai-status-light/push.json`(含密钥,**不在仓库内**);日志只记主机名不记 key
+- 手表靠 iOS 通知镜像:**通知必须真正进入 iPhone 通知中心**才会转发;手表自身的勿扰/睡眠模式仍会静默
+
 ## 构建与运行
 
 需要 macOS 13+ 与 Xcode Command Line Tools(Swift 5.9+)。
 
 ```bash
 make build     # swift build -c release
-make bundle    # 组装 "build/AI Status Light.app"(ad-hoc 签名)
+make bundle    # 组装 "build/AI Status Light.app"(稳定签名,回退 ad-hoc)
 make run       # 构建并打开 App
 make install   # 构建并安装到 /Applications 后打开(推荐)
 ```
@@ -148,7 +174,7 @@ Package.swift                 SwiftPM 工程
 Sources/AIStatusLight/        App 源码(菜单栏 / 聚合 / 灯效 / 图标 / 面板 / 悬浮窗)
 Sources/PrivateStatusItem/    ObjC 小桥接:高优先级放置状态项(私有 API,带兜底)
 Resources/Info.plist          打包用 Info.plist
-scripts/bundle.sh             组装 .app + ad-hoc 签名
+scripts/bundle.sh             组装 .app + 稳定签名(回退 ad-hoc)
 aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ```
 
