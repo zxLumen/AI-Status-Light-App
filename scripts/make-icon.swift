@@ -146,6 +146,8 @@ let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let iconset = root.appendingPathComponent("Resources/AppIcon.iconset")
 let icns = root.appendingPathComponent("Resources/AppIcon.icns")
 let png1024 = root.appendingPathComponent("docs/images/icon-1024.png")
+/// Served to Bark as the notification icon (`icon` param), so it is committed.
+let png256 = root.appendingPathComponent("docs/images/icon-256.png")
 
 let fm = FileManager.default
 try? fm.removeItem(at: iconset)
@@ -169,6 +171,9 @@ for (name, pixels) in entries {
 if let data = render(size: 1024, detail: true).representation(using: .png, properties: [:]) {
     try data.write(to: png1024)
 }
+if let data = render(size: 256, detail: true).representation(using: .png, properties: [:]) {
+    try data.write(to: png256)
+}
 
 let iconutil = Process()
 iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
@@ -183,3 +188,4 @@ guard iconutil.terminationStatus == 0 else {
 print("iconset: \(iconset.path)")
 print("icns:    \(icns.path)")
 print("png:     \(png1024.path)")
+print("png256:  \(png256.path)")

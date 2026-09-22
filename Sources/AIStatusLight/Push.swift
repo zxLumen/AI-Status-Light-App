@@ -11,8 +11,33 @@ struct PushConfig: Codable {
     var successLevel: String = "active"        // error / success
     var sound: String = "default"
     var cooldown: Double = 60                  // per session+state dedupe window
+    /// Notification icon (iOS 15+); set to "" to keep Bark's own icon.
+    var icon: String? = PushConfig.defaultIconURL
+
+    /// Public copy of `docs/images/icon-256.png` (jsDelivr is reachable from
+    /// the iPhone; raw.githubusercontent.com often is not in mainland China).
+    static let defaultIconURL =
+        "https://cdn.jsdelivr.net/gh/zxLumen/AI-Status-Light-App@main/docs/images/icon-256.png"
 
     static var path: URL { StateStore.home.appendingPathComponent("push.json") }
+
+    init() {}
+
+    // Tolerant decoding: missing keys fall back to the defaults above, so new
+    // fields can be added without breaking an existing push.json.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = PushConfig()
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? d.provider
+        url = try c.decodeIfPresent(String.self, forKey: .url) ?? d.url
+        states = try c.decodeIfPresent([String: Bool].self, forKey: .states) ?? d.states
+        level = try c.decodeIfPresent(String.self, forKey: .level) ?? d.level
+        successLevel = try c.decodeIfPresent(String.self, forKey: .successLevel) ?? d.successLevel
+        sound = try c.decodeIfPresent(String.self, forKey: .sound) ?? d.sound
+        cooldown = try c.decodeIfPresent(Double.self, forKey: .cooldown) ?? d.cooldown
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? d.icon
+    }
 
     static func load() -> PushConfig {
         guard let data = try? Data(contentsOf: path),
@@ -62,11 +87,13 @@ final class PushNotifier {
 
     /// Bark-style JSON payload (pure; unit-testable).
     static func payload(title: String, body: String, level: String,
-                        group: String?, badge: Int?, sound: String?) -> [String: Any] {
+                        group: String?, badge: Int?, sound: String?,
+                        icon: String? = nil) -> [String: Any] {
         var p: [String: Any] = ["title": title, "body": body, "level": level]
         if let group, !group.isEmpty { p["group"] = group }
         if let badge { p["badge"] = badge }
         if let sound, !sound.isEmpty { p["sound"] = sound }
+        if let icon, !icon.isEmpty { p["icon"] = icon }
         return p
     }
 
@@ -84,7 +111,8 @@ final class PushNotifier {
             post(Self.payload(title: Self.title(for: rec.state),
                               body: Self.body(for: rec),
                               level: rec.state == "blocked" ? config.level : config.successLevel,
-                              group: rec.sessionId, badge: badge, sound: config.sound),
+                              group: rec.sessionId, badge: badge, sound: config.sound,
+                              icon: config.icon),
                  tag: "\(rec.state) sid=\(rec.sessionId)")
             sent.append(rec)
         }
@@ -95,7 +123,8 @@ final class PushNotifier {
         guard !config.url.isEmpty else { log?("push test skipped: url empty"); return }
         post(Self.payload(title: "测试推送",
                           body: "AI 状态灯 · 在手机/手表上看到这条即配置成功",
-                          level: config.level, group: "test", badge: nil, sound: config.sound),
+                          level: config.level, group: "test", badge: nil, sound: config.sound,
+                          icon: config.icon),
              tag: "test")
     }
 
@@ -120,12 +149,13 @@ final class PushNotifier {
         req.httpBody = data
         req.timeoutInterval = 10
         let host = url.host ?? "?"                 // never log the key in the path
+        let title = (payload["title"] as? String) ?? "-"
         queue.async { [weak self] in
             URLSession.shared.dataTask(with: req) { _, resp, err in
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
                 let ok = err == nil && (200..<300).contains(code)
                 let suffix = err.map { " err=\($0.localizedDescription)" } ?? ""
-                self?.log?("push \(tag) host=\(host) ok=\(ok) code=\(code)\(suffix)")
+                self?.log?("push \(tag) title=\(title) host=\(host) ok=\(ok) code=\(code)\(suffix)")
             }.resume()
         }
     }

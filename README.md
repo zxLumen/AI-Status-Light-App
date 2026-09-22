@@ -98,6 +98,11 @@ macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(
   - `timeSensitive` **仍会进通知中心并带角标**,只是"何时打扰你"更强制
 - **去重**:同一会话同一状态 `cooldown` 秒内只推一次(默认 60s),防止 error 升级刷屏
 - **角标** = 待处理的 需要你/出错 会话数;**分组** = 会话 id(iOS 上同会话通知折叠)
+- **通知图标**(iOS 15+):默认用本项目的图标
+  (`https://cdn.jsdelivr.net/gh/zxLumen/AI-Status-Light-App@main/docs/images/icon-256.png`)
+  - 换图标:改 `~/.ai-status-light/push.json` 的 `icon`(任意可公网访问的图片 URL)
+  - 关掉(用 Bark 自带图标):把 `icon` 设为 `""`
+  - 国内若 CDN 不通,可把 `docs/images/icon-256.png` 传到任意可达图床,再填其 URL
 - 配置存在 `~/.ai-status-light/push.json`(含密钥,**不在仓库内**);日志只记主机名不记 key
 - 手表靠 iOS 通知镜像:**通知必须真正进入 iPhone 通知中心**才会转发;手表自身的勿扰/睡眠模式仍会静默
 
@@ -179,7 +184,7 @@ Sources/PrivateStatusItem/    ObjC 小桥接:高优先级放置状态项(私有 
 Resources/Info.plist          打包用 Info.plist
 Resources/AppIcon.icns        App 图标(由 scripts/make-icon.swift 生成)
 scripts/bundle.sh             组装 .app + 稳定签名(回退 ad-hoc)
-scripts/make-icon.swift       矢量绘制 App 图标并打包 .icns
+scripts/make-icon.swift       矢量绘制 App 图标并打包 .icns(含推送用 icon-256.png)
 aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ```
 

@@ -6,6 +6,12 @@
 ## [Unreleased]
 
 ### Added
+- Bark 推送**自定义通知图标**(iOS 15+):默认指向本仓库 `docs/images/icon-256.png`
+  (jsDelivr);`push.json` 的 `icon` 可换成任意 URL,设为 `""` 则用 Bark 自带图标
+- `PushConfig` 改为**容错解码**:缺失字段回退默认值,新增字段不再破坏已有 `push.json`
+- 推送日志增加 `title`,便于分辨是否重复
+
+### Added
 - **应用图标**:深色圆角机身 + 竖排三玻璃灯(红/黄/绿,全亮),与悬浮灯「圆角外壳」同源
   - 新增 `scripts/make-icon.swift`(AppKit 矢量绘制)与 `make icon`;生成
     `Resources/AppIcon.icns` 与 `docs/images/icon-1024.png`,小尺寸自动简化细节
