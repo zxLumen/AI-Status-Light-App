@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var rotationTimer: Timer?
     private var lastDisplayed: String?
     private let rotationBase: Double = 2.5
+    private let ackQueue = DispatchQueue(label: "aistatus.ack")
+    private var lastFrontKey: String?
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -200,19 +202,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Clear a finished/failed session once its window is brought to the front.
+    /// Clear a finished/failed session only when the user **switches** to its
+    /// window/tab (a frontmost transition) — not merely because they're on it.
     private func acknowledgeFocused() {
         guard UserDefaults.standard.object(forKey: "ui.ackOnFocus") as? Bool ?? true else { return }
         let pending = allSessions.filter { $0.state == "success" || $0.state == "error" }
-        guard !pending.isEmpty,
-              let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
-        DispatchQueue.global(qos: .utility).async {
+        guard !pending.isEmpty else { return }
+        ackQueue.async { [weak self] in
+            guard let self, let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
+            let key = self.frontKey(front)
+            if self.lastFrontKey == nil { self.lastFrontKey = key; return }  // prime, don't ack
+            guard key != self.lastFrontKey else { return }                   // no transition
+            self.lastFrontKey = key
             let trusted = WindowFocuser.isTrusted
             for rec in pending {
                 let ids = AppLauncher.targetBundleIds(for: rec.agent, host: rec.host)
                 guard ids.contains(front) else { continue }
                 var verified = false
                 if front.hasPrefix("com.microsoft.VSCode") {
-                    // Need the focused window's title to match the project folder.
                     if trusted, let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId), !dir.isEmpty {
                         let folder = (dir as NSString).lastPathComponent
                         verified = !folder.isEmpty
@@ -220,36 +227,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 .localizedCaseInsensitiveContains(folder)
                     }
                 } else if front == "com.googlecode.iterm2" {
-                    // Need iTerm's current tab to be this session's tab.
                     if let r = rec.ref, !r.isEmpty, let cur = ITermFocus.currentSessionRef() {
                         verified = (cur == r)
                     }
                 } else if front == "ai.opencode.desktop" {
                     verified = true
                 }
-                if verified { StateStore.markAcknowledged(rec.sessionId) }
+                if verified {
+                    self.appLog("ack \(rec.sessionId) state=\(rec.state) host=\(rec.host ?? "-") via=\(front)")
+                    StateStore.markAcknowledged(rec.sessionId)
+                }
             }
         }
     }
 
-    /// Precise "already looking at it" check (VS Code title / iTerm current tab).
-    private func preciselyFocused(agent: String, dir: String?, host: String?, ref: String?) -> Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-              AppLauncher.targetBundleIds(for: agent, host: host).contains(front) else { return false }
-        if front.hasPrefix("com.microsoft.VSCode") {
-            guard WindowFocuser.isTrusted, let d = dir, !d.isEmpty else { return false }
-            let folder = (d as NSString).lastPathComponent
-            guard !folder.isEmpty else { return false }
-            return (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
-                .localizedCaseInsensitiveContains(folder)
+    /// Identity of the current foreground window/tab (used to detect switches).
+    private func frontKey(_ bundle: String) -> String {
+        if bundle == "com.googlecode.iterm2" {
+            return bundle + "|" + (ITermFocus.currentSessionRef() ?? "")
         }
-        if front == "com.googlecode.iterm2" {
-            guard let r = ref, !r.isEmpty, let cur = ITermFocus.currentSessionRef() else { return false }
-            return cur == r
+        if bundle.hasPrefix("com.microsoft.VSCode") {
+            return bundle + "|" + (WindowFocuser.focusedWindowTitle(bundleId: bundle) ?? "")
         }
-        if front == "ai.opencode.desktop" { return true }
-        return false
+        return bundle
     }
+
 
     @objc private func focusChanged() { acknowledgeFocused() }
 
@@ -296,12 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let label = (mode == "blocked" && blockedCount > 1) ? "\(blockedCount) 个任务需要你"
                                                             : contract.label(shownMode)
         let detail = (top?.message?.isEmpty == false) ? top!.message : nil
-        // Already looking at that window → acknowledge silently, no bubble.
-        if shownMode == "success" || shownMode == "error",
-           let sid, preciselyFocused(agent: agent, dir: dir, host: host, ref: ref) {
-            StateStore.markAcknowledged(sid)
-            return
-        }
         let duration = d.object(forKey: "ui.bubbleDuration") as? Double ?? 8
         bubble.show(label: label,
                     colorHex: contract.colorHex(shownMode),
