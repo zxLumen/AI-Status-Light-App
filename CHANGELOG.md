@@ -6,6 +6,11 @@
 ## [Unreleased]
 
 ### Added
+- **多会话轮播**:存在多个不同状态时,菜单栏图标与悬浮灯按优先级轮流展示(每 2.5s;
+  blocked/error 停留 2 倍);状态去重、只有一个状态或手动覆盖/演示时不轮播;
+  菜单标题仍显示最高优先级
+
+### Added
 - **状态变化气泡**:任务进入 blocked/success/error 时在菜单栏图标下方弹出气泡,
   显示 agent + 会话名,4s 自动淡出;点击跳转到任务 App(opencode→OpenCode、cursor→Cursor);
   菜单可开关气泡并选停留时长;下拉菜单的会话行也可点击跳转

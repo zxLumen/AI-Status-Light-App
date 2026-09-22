@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var errorTimes: [Date] = []
     private var alarmAt = Date.distantPast
     private var pollTick = 0
+    private var rotationModes: [String] = []
+    private var rotationIndex = 0
+    private var rotationTimer: Timer?
+    private var lastDisplayed: String?
+    private let rotationBase: Double = 2.5
 
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
@@ -92,12 +97,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - State
 
-    private func currentMode() -> String {
+    private func demoMode() -> String? {
         if let until = demoUntil, Date() < until, let start = demoStart {
             let seq = ["thinking", "working", "busy", "success", "blocked", "error", "traffic"]
             return seq[Int(Date().timeIntervalSince(start) / 1.2) % seq.count]
         }
+        return nil
+    }
+
+    /// What the icon / floating light should show right now: demo → manual
+    /// override → rotation (when several distinct states) → aggregate.
+    private func displayMode() -> String {
+        if let d = demoMode() { return d }
+        if last.manual { return last.mode }
+        if rotationModes.count > 1 {
+            return rotationModes[min(rotationIndex, rotationModes.count - 1)]
+        }
         return last.mode
+    }
+
+    private func currentMode() -> String { displayMode() }
+
+    /// Distinct live states (priority order) that participate in rotation.
+    @discardableResult
+    private func recomputeRotation() -> Bool {
+        let now = Date().timeIntervalSince1970
+        var seen = Set<String>()
+        var items: [(mode: String, pri: Int)] = []
+        for rec in allSessions where rec.ack != true && now - rec.ts <= contract.ttl(rec.state) {
+            let mode = contract.mode(for: rec.state)
+            if seen.contains(mode) { continue }
+            seen.insert(mode)
+            items.append((mode, contract.priorityOf(rec.state)))
+        }
+        let modes = items.sorted { $0.pri > $1.pri }.map { $0.mode }
+        guard modes != rotationModes else { return false }
+        rotationModes = modes
+        if rotationIndex >= modes.count { rotationIndex = 0 }
+        return true
+    }
+
+    private func scheduleRotation() {
+        rotationTimer?.invalidate()
+        rotationTimer = nil
+        guard rotationModes.count > 1, demoMode() == nil, !last.manual else { return }
+        let mode = rotationModes[min(rotationIndex, rotationModes.count - 1)]
+        // blocked / error linger twice as long.
+        let dwell = (mode == "blocked" || mode == "error") ? rotationBase * 2 : rotationBase
+        let t = Timer.scheduledTimer(withTimeInterval: dwell, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.rotationIndex = (self.rotationIndex + 1) % max(1, self.rotationModes.count)
+            self.applyDisplay()
+            self.scheduleRotation()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        rotationTimer = t
+    }
+
+    private func applyDisplay() {
+        let m = displayMode()
+        if m == lastDisplayed { return }
+        lastDisplayed = m
+        if appState?.mode != m { appState?.mode = m }
+        dbg("display -> \(m) rotate=\(rotationModes) idx=\(rotationIndex)")
+        syncAnimation()
     }
 
     private func poll() {
@@ -105,7 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         allSessions = records
         last = Aggregator.aggregate(records, contract: contract)
         appState?.update(last)
-        syncAnimation()
+        let changed = recomputeRotation()
+        applyDisplay()
+        if changed || rotationTimer == nil { scheduleRotation() }
         trackInterrupts(records)
         pollTick &+= 1
         if pollTick % 4 == 0 { acknowledgeFocused() }
@@ -314,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let mode = currentMode()
+        let mode = last.mode   // menu header shows the top-priority state, not the rotating one
 
         menu.addItem(disabled(line(contract.colorHex(mode),
                                    contract.label(mode) + (last.manual ? " · 手动" : ""))))
