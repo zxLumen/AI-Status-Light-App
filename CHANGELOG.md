@@ -60,6 +60,11 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- 滑动松手后**还要停约 1 秒才飞走**:触控板抬指后的**惯性 `scrollWheel` 事件**持续到达,
+  每次都重置 0.15s 静默定时器。改为**累计一旦 ≥40pt 立即飞出**(不等惯性),
+  并用 `phase/momentumPhase == .ended` 判断手势真正结束;静默计时器仅作无相位设备的兜底
+
+### Fixed
 - 滑动**滑一半卡住**:`hitTest` 只认随 `offset` 移动的卡片矩形,卡片滑离静止的光标后
   panel 收不到 `scrollWheel`,手势中断。改为手势期间 `capturing` 覆盖整个 bounds,
   结束后恢复仅卡片可点;`followLimit 45→90`、`margin 60→140`,跟手更明显

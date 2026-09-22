@@ -103,10 +103,13 @@ final class BubbleContainerView: FirstMouseView {
     var margin: CGFloat = 0
     var offsetProvider: () -> CGFloat = { 0 }
     var onScrollChanged: ((CGFloat) -> Void)?
-    var onScrollSettled: ((CGFloat) -> Void)?
+    var onScrollEnd: ((CGFloat) -> Void)?     // gesture ended without crossing the threshold
+    var onSwipe: ((CGFloat) -> Void)?         // threshold crossed → dismiss immediately
+    var swipeThreshold: CGFloat = 40
     private var accum: CGFloat = 0
     private var settle: Timer?
     private var capturing = false
+    private var finished = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // While a swipe is in progress keep receiving events even if the card
@@ -121,6 +124,7 @@ final class BubbleContainerView: FirstMouseView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if finished { return }
         let dx = event.scrollingDeltaX
         let dy = event.scrollingDeltaY
         guard abs(dx) > abs(dy), abs(dx) > 0.1 else {
@@ -130,16 +134,37 @@ final class BubbleContainerView: FirstMouseView {
         capturing = true
         accum += dx
         onScrollChanged?(accum)
-        settle?.invalidate()
-        let t = Timer(timeInterval: 0.15, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            let total = self.accum
-            self.accum = 0
-            self.capturing = false
-            self.onScrollSettled?(total)
+
+        // Fly out the moment the swipe is decisive — do not wait for the
+        // momentum scroll (which keeps arriving ~1s after the fingers lift).
+        if abs(accum) >= swipeThreshold {
+            finished = true
+            capturing = false
+            settle?.invalidate()
+            settle = nil
+            onSwipe?(accum)
+            return
         }
+        // Explicit end of momentum, or a cancelled gesture, ends it now.
+        if event.momentumPhase.contains(.ended) || event.phase.contains(.cancelled) {
+            settleUp()
+            return
+        }
+        // Fallback for devices that report no phase: end after a short silence.
+        settle?.invalidate()
+        let t = Timer(timeInterval: 0.15, repeats: false) { [weak self] _ in self?.settleUp() }
         RunLoop.main.add(t, forMode: .common)
         settle = t
+    }
+
+    private func settleUp() {
+        guard !finished else { return }
+        settle?.invalidate()
+        settle = nil
+        capturing = false
+        let total = accum
+        accum = 0
+        onScrollEnd?(total)
     }
 }
 
@@ -155,6 +180,7 @@ final class BubbleController {
     private var cardWidth: CGFloat = 270
     private var showToken = 0
 
+    private static let swipeDismiss: CGFloat = 40     // crossed mid-swipe → fly out at once
     private static let swipeMin: CGFloat = 20         // ignore sub-pixel jitter
     private static let dragDistance: CGFloat = 80     // mouse drag
     private static let margin: CGFloat = 140          // transparent side padding
@@ -225,6 +251,7 @@ final class BubbleController {
         let container = BubbleContainerView(frame: NSRect(origin: .zero, size: panelSize))
         container.margin = Self.margin
         container.offsetProvider = { [weak model] in model?.offset ?? 0 }
+        container.swipeThreshold = Self.swipeDismiss
         container.onScrollChanged = { [weak self] accum in
             guard let self else { return }
             self.hoverMuted = true          // a swipe makes hover irrelevant
@@ -232,9 +259,12 @@ final class BubbleController {
             let v = max(-Self.followLimit, min(Self.followLimit, accum * Self.followRatio))
             self.model?.offset = v
         }
-        container.onScrollSettled = { [weak self] total in
+        container.onSwipe = { [weak self] total in
+            self?.fling(direction: total < 0 ? -1 : 1)
+        }
+        container.onScrollEnd = { [weak self] total in
             guard let self else { return }
-            // Any deliberate swipe dismisses; only sub-pixel jitter snaps back.
+            // Gesture ended below the fly-out threshold: dismiss unless it was jitter.
             if abs(total) >= Self.swipeMin {
                 self.fling(direction: total < 0 ? -1 : 1)
             } else {
