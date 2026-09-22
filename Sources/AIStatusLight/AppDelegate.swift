@@ -450,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(disabled(gray("无会话")))
         } else {
             let now = Date().timeIntervalSince1970
-            for rec in allSessions.sorted(by: { $0.ts > $1.ts }) {
+            for rec in StateStore.menuOrder(allSessions, now: now, contract: contract) {
                 let color = contract.colorHex(contract.mode(for: rec.state))
                 let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
                 let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)

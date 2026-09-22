@@ -121,16 +121,29 @@ enum StateStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Menu order: active sessions (un-acked, still within TTL) first, then the
+    /// rest; within each group, most recent activity first. Acked/stale rows
+    /// therefore sink to the bottom instead of jumping up when focused.
+    static func menuOrder(_ records: [SessionRecord], now: Double,
+                          contract: Contract) -> [SessionRecord] {
+        records.sorted { a, b in
+            let fa = a.ack != true && now - a.ts <= contract.ttl(a.state)
+            let fb = b.ack != true && now - b.ts <= contract.ttl(b.state)
+            if fa != fb { return fa }
+            return a.ts > b.ts
+        }
+    }
+
     /// Keep the session listed but mark it "seen": no longer an attention state.
     static func markAcknowledged(_ sessionId: String) {
         let safe = sessionId.map { $0.isLetter || $0.isNumber || "-_.".contains($0) ? $0 : "_" }
         let url = sessionsDir.appendingPathComponent(String(safe) + ".json")
         guard let data = try? Data(contentsOf: url),
               var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-        let now = Date().timeIntervalSince1970
+        // Do NOT touch ts/seq: acknowledging must not look like fresh activity,
+        // otherwise a session jumps to the top of the menu when its window is
+        // merely focused (auto-ack), and the out-of-order guard would be skewed.
         obj["ack"] = true
-        obj["ts"] = now
-        obj["seq"] = Int(now * 1000)
         if let out = try? JSONSerialization.data(withJSONObject: obj) {
             try? out.write(to: url)
         }
