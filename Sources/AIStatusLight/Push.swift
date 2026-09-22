@@ -13,6 +13,9 @@ struct PushConfig: Codable {
     var cooldown: Double = 60                  // per session+state dedupe window
     /// Notification icon (iOS 15+); set to "" to keep Bark's own icon.
     var icon: String? = PushConfig.defaultIconURL
+    /// Bark `id` mode: "random" (each push is new), "stable" (same session+state
+    /// updates the same notification, so re-deliveries collapse), "off".
+    var idMode: String = "random"
 
     /// Public copy of `docs/images/icon-256.png` (jsDelivr is reachable from
     /// the iPhone; raw.githubusercontent.com often is not in mainland China).
@@ -37,6 +40,7 @@ struct PushConfig: Codable {
         sound = try c.decodeIfPresent(String.self, forKey: .sound) ?? d.sound
         cooldown = try c.decodeIfPresent(Double.self, forKey: .cooldown) ?? d.cooldown
         icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? d.icon
+        idMode = try c.decodeIfPresent(String.self, forKey: .idMode) ?? d.idMode
     }
 
     static func load() -> PushConfig {
@@ -97,6 +101,15 @@ final class PushNotifier {
         return p
     }
 
+    /// Bark notification id for a session state (pure; unit-testable).
+    static func barkID(mode: String, sessionId: String, state: String) -> String? {
+        switch mode {
+        case "off":    return nil
+        case "stable": return "\(sessionId)|\(state)"
+        default:       return String(Int.random(in: 1...9_999_999))
+        }
+    }
+
     /// Notify for every transition that is enabled and not within its cooldown.
     @discardableResult
     func maybeNotify(_ transitions: [SessionRecord], badge: Int) -> [SessionRecord] {
@@ -113,7 +126,8 @@ final class PushNotifier {
                               level: rec.state == "blocked" ? config.level : config.successLevel,
                               group: rec.sessionId, badge: badge, sound: config.sound,
                               icon: config.icon),
-                 tag: "\(rec.state) sid=\(rec.sessionId)")
+                 tag: "\(rec.state) sid=\(rec.sessionId)",
+                 id: Self.barkID(mode: config.idMode, sessionId: rec.sessionId, state: rec.state))
             sent.append(rec)
         }
         return sent
@@ -125,7 +139,7 @@ final class PushNotifier {
                           body: "AI 状态灯 · 在手机/手表上看到这条即配置成功",
                           level: config.level, group: "test", badge: nil, sound: config.sound,
                           icon: config.icon),
-             tag: "test")
+             tag: "test", id: "aistatus-test")
     }
 
     static func body(for rec: SessionRecord) -> String {
@@ -137,11 +151,20 @@ final class PushNotifier {
         return lines.joined(separator: "\n")
     }
 
-    private func post(_ payload: [String: Any], tag: String) {
-        guard let url = URL(string: config.url),
+    private func post(_ payload: [String: Any], tag: String, id: String?) {
+        guard let base = URL(string: config.url),
               let data = try? JSONSerialization.data(withJSONObject: payload) else {
             log?("push \(tag) invalid url")
             return
+        }
+        // Bark `id`: pushes sharing an id update the same notification.
+        var url = base
+        if let id, !id.isEmpty,
+           var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) {
+            var items = comps.queryItems ?? []
+            items.append(URLQueryItem(name: "id", value: id))
+            comps.queryItems = items
+            if let u = comps.url { url = u }
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -155,7 +178,7 @@ final class PushNotifier {
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
                 let ok = err == nil && (200..<300).contains(code)
                 let suffix = err.map { " err=\($0.localizedDescription)" } ?? ""
-                self?.log?("push \(tag) title=\(title) host=\(host) ok=\(ok) code=\(code)\(suffix)")
+                self?.log?("push \(tag) title=\(title) id=\(id ?? "-") host=\(host) ok=\(ok) code=\(code)\(suffix)")
             }.resume()
         }
     }

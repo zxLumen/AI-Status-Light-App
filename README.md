@@ -100,6 +100,8 @@ macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(
   - `timeSensitive` **仍会进通知中心并带角标**,只是"何时打扰你"更强制
 - **去重**:同一会话同一状态 `cooldown` 秒内只推一次(默认 60s),防止 error 升级刷屏
 - **角标** = 待处理的 需要你/出错 会话数;**分组** = 会话 id(iOS 上同会话通知折叠)
+- **通知 id**(`idMode`):`random`(默认,每条约新)/ `stable`(同会话同状态会**更新同一条**,
+  重复投递时只留一条)/ `off`
 - **通知图标**(iOS 15+):默认用本项目的图标
   (`https://cdn.jsdelivr.net/gh/zxLumen/AI-Status-Light-App@main/docs/images/icon-256.png`)
   - 换图标:改 `~/.ai-status-light/push.json` 的 `icon`(任意可公网访问的图片 URL)
