@@ -238,8 +238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                 } else if front == "com.googlecode.iterm2" {
                     if let r = rec.ref, !r.isEmpty, let cur = ITermFocus.currentSessionRef() {
-                        verified = (cur == r)
-                        why = "ref cur=\(cur) want=\(r)"
+                        verified = ITermFocus.normalize(cur) == ITermFocus.normalize(r)
+                        why = "ref cur=\(cur) want=\(r) norm=\(ITermFocus.normalize(r))"
                     } else {
                         verified = matching.count == 1
                         why = "app-level ref=\(rec.ref ?? "-") matching=\(matching.count)"

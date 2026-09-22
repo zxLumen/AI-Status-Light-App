@@ -67,6 +67,12 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- **iTerm 里切到 opencode 的 tab 不清除 success**:插件上报的 `ITERM_SESSION_ID` 是
+  `w0t0p0:<UUID>`,而 AppleScript 的 `unique id` 是裸 `<UUID>`,全等比较永远失败。
+  新增 `ITermFocus.normalize`(取尾部 UUID)后比较;`focus()` 同样按归一化匹配并
+  **校验命中**(AppleScript 返回 "ok"),修掉"跳转没真选中 tab 却报成功"
+
+### Fixed
 - 菜单列表因误切窗口而**跳动**:`markAcknowledged` 原会把 `ts`/`seq` 刷新为"现在",
   而列表按 `ts` 倒序 → 被自动确认的会话跳到了最上面。现改为只写 `ack=true`,
   **不再改动 `ts`/`seq`**;排序抽为 `StateStore.menuOrder`,**活跃会话(未确认且在 TTL 内)在前、

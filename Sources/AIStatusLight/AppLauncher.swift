@@ -81,24 +81,35 @@ enum AppLauncher {
 /// Focuses a specific iTerm2 tab/session via AppleScript (needs Automation
 /// permission the first time).
 enum ITermFocus {
+    /// iTerm2 reports the same session in two shapes: the `ITERM_SESSION_ID`
+    /// environment variable is `w0t0p0:<UUID>`, while AppleScript's `unique id`
+    /// is usually the bare UUID. Compare on the trailing UUID only.
+    static func normalize(_ id: String) -> String {
+        id.split(separator: ":").last.map(String.init) ?? id
+    }
+
     static func focus(sessionRef: String) -> Bool {
+        let want = normalize(sessionRef)
         let script = """
         tell application "iTerm2"
           activate
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
-                if (unique id of s) is "\(sessionRef)" then
+                set sid to (unique id of s)
+                if sid is "\(want)" or sid ends with (":" & "\(want)") then
                   select t
                   select s
-                  return
+                  return "ok"
                 end if
               end repeat
             end repeat
           end repeat
         end tell
+        return "no"
         """
-        return run(script) != nil
+        guard let out = run(script, capture: true) else { return false }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines) == "ok"
     }
 
     /// The unique id of iTerm2's current (frontmost) session, for verifying
