@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var alarmAt = Date.distantPast
     private var pollTick = 0
     private var rotationModes: [String] = []
-    private var rotationIndex = 0
+    private var rotCurrent: String?
     private var rotationTimer: Timer?
     private var lastDisplayed: String?
     private let rotationBase: Double = 2.5
@@ -33,7 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let debug = ProcessInfo.processInfo.environment["AISTATUS_DEBUG"] != nil
 
     private func dbg(_ s: String) {
-        if debug { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+        if debug {
+            let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"
+            FileHandle.standardError.write((f.string(from: Date()) + "  " + s + "\n").data(using: .utf8)!)
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -110,8 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func displayMode() -> String {
         if let d = demoMode() { return d }
         if last.manual { return last.mode }
-        if rotationModes.count > 1 {
-            return rotationModes[min(rotationIndex, rotationModes.count - 1)]
+        if rotationModes.count > 1, let cur = rotCurrent, rotationModes.contains(cur) {
+            return cur
         }
         return last.mode
     }
@@ -131,35 +134,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             items.append((mode, contract.priorityOf(rec.state)))
         }
         let modes = items.sorted { $0.pri > $1.pri }.map { $0.mode }
-        guard modes != rotationModes else { return false }
+        let prev = rotationModes
+        let changed = modes != prev
         rotationModes = modes
-        if rotationIndex >= modes.count { rotationIndex = 0 }
-        return true
+        if rotationModes.count <= 1 {
+            rotCurrent = rotationModes.first
+            rotationTimer?.invalidate()
+            rotationTimer = nil
+        } else {
+            // Keep the mode currently shown even if the list re-ordered, so every
+            // state gets its full dwell. Only switch if it disappeared …
+            if let cur = rotCurrent, !modes.contains(cur) { rotCurrent = nil }
+            // … or a brand-new urgent state appeared.
+            if let first = modes.first, first == "blocked" || first == "error", !prev.contains(first) {
+                rotCurrent = first
+                rotationTimer?.invalidate()
+                rotationTimer = nil
+            }
+            if rotCurrent == nil { rotCurrent = modes.first }
+        }
+        return changed
     }
 
     private func scheduleRotation() {
         rotationTimer?.invalidate()
         rotationTimer = nil
-        guard rotationModes.count > 1, demoMode() == nil, !last.manual else { return }
-        let mode = rotationModes[min(rotationIndex, rotationModes.count - 1)]
+        guard rotationModes.count > 1, demoMode() == nil, !last.manual,
+              let cur = rotCurrent else { return }
         // blocked / error linger twice as long.
-        let dwell = (mode == "blocked" || mode == "error") ? rotationBase * 2 : rotationBase
+        let dwell = (cur == "blocked" || cur == "error") ? rotationBase * 2 : rotationBase
         let t = Timer.scheduledTimer(withTimeInterval: dwell, repeats: false) { [weak self] _ in
             guard let self else { return }
-            self.rotationIndex = (self.rotationIndex + 1) % max(1, self.rotationModes.count)
-            self.applyDisplay()
+            if let i = self.rotationModes.firstIndex(of: cur), !self.rotationModes.isEmpty {
+                self.rotCurrent = self.rotationModes[(i + 1) % self.rotationModes.count]
+            }
+            self.applyDisplay(force: true)
             self.scheduleRotation()
         }
         RunLoop.main.add(t, forMode: .common)
         rotationTimer = t
     }
 
-    private func applyDisplay() {
+    private func applyDisplay(force: Bool = false) {
         let m = displayMode()
-        if m == lastDisplayed { return }
+        if !force && m == lastDisplayed { return }
         lastDisplayed = m
         if appState?.mode != m { appState?.mode = m }
-        dbg("display -> \(m) rotate=\(rotationModes) idx=\(rotationIndex)")
+        dbg("display -> \(m) rotate=\(rotationModes) cur=\(rotCurrent ?? "-")")
         syncAnimation()
     }
 
@@ -169,8 +190,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         last = Aggregator.aggregate(records, contract: contract)
         appState?.update(last)
         let changed = recomputeRotation()
+        _ = changed
         applyDisplay()
-        if changed || rotationTimer == nil { scheduleRotation() }
+        if rotationTimer == nil { scheduleRotation() }
         trackInterrupts(records)
         pollTick &+= 1
         if pollTick % 4 == 0 { acknowledgeFocused() }

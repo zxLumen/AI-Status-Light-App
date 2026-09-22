@@ -13,6 +13,7 @@ const lastDir = new Map();
 const lastQuestion = new Map();   // part id -> last status we forwarded
 const lastThinking = new Map();   // part id -> already reported thinking
 const pendingQuestion = new Set(); // sessions currently blocked on a question
+const pendingPermission = new Set(); // sessions waiting on a permission prompt
 const inflight = new Map();        // sessionID -> running tool count
 const heartbeats = new Map();      // sessionID -> interval id
 
@@ -89,10 +90,10 @@ function safeStringify(value) {
   }
 }
 
-// Serialize forwards: one hook child at a time so writes land in order and
-// every failure is observable (no silent drops).
-const queue = [];
-let sending = false;
+// Concurrent forwards with a timeout. Ordering is guaranteed by the store's
+// monotonic `seq` (stale writes are ignored), so we never serialize — a single
+// slow/hung child must not stall every later event.
+const HOOK_TIMEOUT_MS = 8000;
 
 function forward(eventType, properties) {
   const payload = safeStringify({
@@ -106,35 +107,39 @@ function forward(eventType, properties) {
     event: eventType,
     properties,
   });
-  queue.push({ payload, eventType });
-  if (!sending) pump();
-}
-
-function pump() {
-  const item = queue.shift();
-  if (!item) { sending = false; return; }
-  sending = true;
-  const child = spawn(PY, ["-m", "aistatus", "hook", "--agent", "opencode", "--default-state", "", "--verbose"], {
-    env: { ...process.env, AISTATUS_HOME: AI_STATUS_HOME },
-    stdio: ["pipe", "ignore", "pipe"],
-  });
+  let child;
+  try {
+    child = spawn(PY, ["-m", "aistatus", "hook", "--agent", "opencode", "--default-state", "", "--verbose"], {
+      env: { ...process.env, AISTATUS_HOME: AI_STATUS_HOME },
+      stdio: ["pipe", "ignore", "pipe"],
+    });
+  } catch (e) {
+    log(`hook spawn threw ${eventType}: ${e}`);
+    return;
+  }
   let err = "";
   let done = false;
-  const finish = () => { if (done) return; done = true; sending = false; pump(); };
-  child.stderr.on("data", (d) => { err += d.toString(); });
-  child.on("error", (e) => { log(`hook spawn error ${item.eventType}: ${e}`); finish(); });
-  child.on("exit", (code) => {
+  const finish = (reason) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
     const msg = err.trim();
-    if (code || msg || item.eventType.startsWith("question")) {
-      log(`hook exit=${code} ${item.eventType}${msg ? " :: " + msg.split("\n").slice(-2).join(" | ") : ""}`);
+    if (reason || msg || eventType.startsWith("question")) {
+      log(`hook ${reason ?? "ok"} ${eventType}${msg ? " :: " + msg.split("\n").slice(-2).join(" | ") : ""}`);
     }
-    finish();
-  });
+  };
+  const timer = setTimeout(() => {
+    try { child.kill("SIGKILL"); } catch (e) {}
+    finish("timeout");
+  }, HOOK_TIMEOUT_MS);
+  child.stderr.on("data", (d) => { err += d.toString(); });
+  child.on("error", (e) => { err += String(e); finish("spawn-error"); });
+  child.on("exit", (code) => finish(code ? "exit=" + code : null));
   try {
-    child.stdin.end(item.payload);
+    child.stdin.end(payload);
   } catch (e) {
-    log(`stdin error ${item.eventType}: ${e}`);
-    finish();
+    err += String(e);
+    finish("stdin-error");
   }
 }
 
@@ -157,7 +162,7 @@ export const AistatusPlugin = async () => {
         pendingQuestion.add(sid);
         return;
       }
-      if (pendingQuestion.has(sid)) return;
+      if (pendingQuestion.has(sid) || pendingPermission.has(sid)) return;
       log(`tool.before sid=${sid} tool=${input?.tool}`);
       forward("tool.before", { sessionID: sid, tool: input?.tool });
     },
@@ -171,7 +176,7 @@ export const AistatusPlugin = async () => {
         pendingQuestion.delete(sid);
         return;
       }
-      if (pendingQuestion.has(sid)) return;
+      if (pendingQuestion.has(sid) || pendingPermission.has(sid)) return;
       forward("tool.after", { sessionID: sid, tool: input?.tool });
     },
     event: async ({ event }) => {
@@ -185,6 +190,10 @@ export const AistatusPlugin = async () => {
       if (!sessionID) return;
       const title = info.title ?? props.title;
       const dir = info.directory ?? props.directory;
+
+      // A permission prompt keeps the session blocked; remember it.
+      if (type === "permission.asked" || type === "permission.updated") pendingPermission.add(sessionID);
+      else if (type === "permission.replied") pendingPermission.delete(sessionID);
 
       // The `question` tool blocks on the user choosing an option — surface it as
       // blocked (opencode keeps session.status busy, so it needs special handling).
@@ -225,11 +234,16 @@ export const AistatusPlugin = async () => {
         return;
       }
 
-      // While a question is pending, ignore busy so it doesn't overwrite blocked.
+      // While a question/permission is pending, ignore busy so it can't
+      // overwrite blocked.
       if (type === "session.status") {
         const st = props.status?.type;
-        if (st === "idle") pendingQuestion.delete(sessionID);
-        else if (st === "busy" && pendingQuestion.has(sessionID)) return;
+        if (st === "idle") {
+          pendingQuestion.delete(sessionID);
+          pendingPermission.delete(sessionID);
+        } else if (st === "busy" && (pendingQuestion.has(sessionID) || pendingPermission.has(sessionID))) {
+          return;
+        }
       }
 
       // session.updated fires often; only forward when title/directory changes.

@@ -50,6 +50,16 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- **转发队列卡死**:串行队列被一个卡住的子进程拖垮,之后所有事件不再写入(表现为
+  权限弹窗却显示 busy、success 丢失)。改为**并发转发 + 单进程 8s 超时 kill**,
+  顺序仍由 `seq` 保证
+- **权限挂起保护**:`permission.asked` 后被 busy/tool.before 覆盖回 working;
+  现挂起期间抑制 busy/tool 事件,blocked 保持到 `permission.replied`
+- **轮播改按状态名计时**:之前用下标,列表顺序/长度一变就把 success 顶掉;现只有
+  当前状态消失或计时到才切换,每个状态拿满时长(2.5s,blocked/error 5s);
+  新出现的 blocked/error 会立即打断
+
+### Fixed
 - 跳转目标改为**按会话宿主**:插件上报 `host`(iTerm/VS Code/OpenCode 桌面)与 `ref`,
   修复"iTerm 里的 opencode 被跳到 VS Code";iTerm 用 `ref` 精确选中 tab,桌面版走深链
 - 事件转发**串行化** + `safeStringify` 加固 + 子进程 stderr 全量记录,
