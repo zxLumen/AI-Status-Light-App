@@ -6,6 +6,13 @@
 ## [Unreleased]
 
 ### Added
+- **会话数量限制 + 管理**:菜单「会话管理」子菜单
+  - 菜单显示上限可选 5/10/20/50/不限(默认 10),超出折叠为「…还有 N 个会话」
+  - 手动清理:`清理已确认 / 过期`、`只保留最近 50 个`、`清空全部会话`
+  - `StateStore.pruneStale` / `pruneKeepingNewest` 清理时会同步删除
+    `names.json` / `dirs.json` / `hosts.json` 中对应条目
+
+### Added
 - Bark 推送**自定义通知图标**(iOS 15+):默认指向本仓库 `docs/images/icon-256.png`
   (jsDelivr);`push.json` 的 `icon` 可换成任意 URL,设为 `""` 则用 Bark 自带图标
 - `PushConfig` 改为**容错解码**:缺失字段回退默认值,新增字段不再破坏已有 `push.json`

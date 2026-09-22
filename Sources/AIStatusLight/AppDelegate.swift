@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var rotationTimer: Timer?
     private var lastDisplayed: String?
     private let rotationBase: Double = 2.5
+    static let sessionKeep = 50          // "只保留最近 N 个" 的 N
     private let ackQueue = DispatchQueue(label: "aistatus.ack")
     private var lastFrontKey: String?
 
@@ -287,6 +288,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.object(forKey: "ui.bubble.\(key)") as? Bool ?? (key != "interrupt")
     }
 
+    /// Submenu: how many sessions to list, plus manual cleanup actions.
+    private func sessionManageMenu() -> NSMenuItem {
+        let sub = NSMenu()
+        sub.addItem(disabled(gray("当前 \(allSessions.count) 个会话")))
+
+        let limitSub = NSMenu()
+        let current = UserDefaults.standard.object(forKey: "ui.sessionLimit") as? Int ?? 10
+        for (title, value) in [("5", 5), ("10", 10), ("20", 20), ("50", 50), ("不限", 0)] {
+            let it = NSMenuItem(title: title, action: #selector(setSessionLimit(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = value
+            it.state = current == value ? .on : .off
+            limitSub.addItem(it)
+        }
+        let limitItem = NSMenuItem(title: "菜单显示上限", action: nil, keyEquivalent: "")
+        limitItem.submenu = limitSub
+        sub.addItem(limitItem)
+
+        sub.addItem(.separator())
+        let stale = NSMenuItem(title: "清理已确认 / 过期", action: #selector(pruneStaleSessions), keyEquivalent: "")
+        stale.target = self
+        sub.addItem(stale)
+        let old = NSMenuItem(title: "只保留最近 \(Self.sessionKeep) 个",
+                             action: #selector(pruneOldSessions), keyEquivalent: "")
+        old.target = self
+        sub.addItem(old)
+        let all = NSMenuItem(title: "清空全部会话", action: #selector(clearState), keyEquivalent: "")
+        all.target = self
+        sub.addItem(all)
+
+        let item = NSMenuItem(title: "会话管理", action: nil, keyEquivalent: "")
+        item.submenu = sub
+        return item
+    }
+
+    @objc private func setSessionLimit(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.tag, forKey: "ui.sessionLimit")
+    }
+
+    @objc private func pruneStaleSessions() {
+        let n = StateStore.pruneStale(contract: contract, now: Date().timeIntervalSince1970)
+        appLog("prune stale removed=\(n)")
+        poll()
+    }
+
+    @objc private func pruneOldSessions() {
+        let n = StateStore.pruneKeepingNewest(Self.sessionKeep)
+        appLog("prune old removed=\(n) keep=\(Self.sessionKeep)")
+        poll()
+    }
+
     /// Sessions that just changed into a key state (needs-you / done / error).
     /// Fired per *session* (not the aggregate mode): with several concurrent
     /// sessions the aggregate is often a higher-priority state, so a finishing
@@ -475,7 +527,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(disabled(gray("无会话")))
         } else {
             let now = Date().timeIntervalSince1970
-            for rec in StateStore.menuOrder(allSessions, now: now, contract: contract) {
+            let ordered = StateStore.menuOrder(allSessions, now: now, contract: contract)
+            let limit = UserDefaults.standard.object(forKey: "ui.sessionLimit") as? Int ?? 10  // 0 = 不限
+            let shown = limit > 0 ? Array(ordered.prefix(limit)) : ordered
+            dbg("menu sessions shown=\(shown.count)/\(ordered.count) limit=\(limit)")
+            for rec in shown {
                 let color = contract.colorHex(contract.mode(for: rec.state))
                 let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
                 let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)
@@ -496,11 +552,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.toolTip = AppLauncher.canJump(agent: rec.agent) ? "点击跳到 \(rec.agent)" : "点击打开状态面板"
                 menu.addItem(item)
             }
+            if ordered.count > shown.count {
+                menu.addItem(disabled(gray("…还有 \(ordered.count - shown.count) 个会话(会话管理里可调)")))
+            }
         }
 
         menu.addItem(.separator())
         menu.addItem(action("演示(Demo)", #selector(startDemo)))
         menu.addItem(action("清空状态", #selector(clearState)))
+        menu.addItem(sessionManageMenu())
         menu.addItem(action("状态面板", #selector(showStatusPanel)))
         let login = action("开机自启", #selector(toggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off

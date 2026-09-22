@@ -121,6 +121,44 @@ enum StateStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Drop entries for removed sessions from the name / dir / host side-tables,
+    /// so those don't grow forever either.
+    private static func forget(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let set = Set(ids)
+        for path in [namesPath, dirsPath, hostsPath] {
+            guard let data = try? Data(contentsOf: path),
+                  var map = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            for key in set { map.removeValue(forKey: key) }
+            if let out = try? JSONSerialization.data(withJSONObject: map) {
+                try? out.write(to: path)
+            }
+        }
+    }
+
+    /// Delete sessions that are acknowledged or past their TTL (the dimmed rows).
+    @discardableResult
+    static func pruneStale(contract: Contract, now: Double) -> Int {
+        var removed: [String] = []
+        for rec in readSessions() where rec.ack == true || now - rec.ts > contract.ttl(rec.state) {
+            clearSession(rec.sessionId)
+            removed.append(rec.sessionId)
+        }
+        forget(removed)
+        return removed.count
+    }
+
+    /// Keep only the newest `limit` sessions (by activity), delete the rest.
+    @discardableResult
+    static func pruneKeepingNewest(_ limit: Int) -> Int {
+        let recs = readSessions().sorted { $0.ts > $1.ts }
+        guard limit >= 0, recs.count > limit else { return 0 }
+        let victims = recs.dropFirst(limit)
+        for rec in victims { clearSession(rec.sessionId) }
+        forget(victims.map { $0.sessionId })
+        return victims.count
+    }
+
     /// Menu order: active sessions (un-acked, still within TTL) first, then the
     /// rest; within each group, most recent activity first. Acked/stale rows
     /// therefore sink to the bottom instead of jumping up when focused.
