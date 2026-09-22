@@ -221,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             guard !matching.isEmpty else { return }
             let trusted = WindowFocuser.isTrusted
+            var verifiedRecs: [SessionRecord] = []
             for rec in matching {
                 var verified = false
                 var why = ""
@@ -248,10 +249,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     why = "app-level matching=\(matching.count)"
                 }
                 self.appLog("ack? \(rec.sessionId) verified=\(verified) \(why)")
-                if verified {
-                    self.appLog("ack \(rec.sessionId) state=\(rec.state) host=\(rec.host ?? "-") via=\(front)")
-                    StateStore.markAcknowledged(rec.sessionId)
-                }
+                if verified { verifiedRecs.append(rec) }
+            }
+            // Several sessions can map to the same window (same project folder) —
+            // acknowledge only the most recent one per switch.
+            if let one = verifiedRecs.max(by: { $0.ts < $1.ts }) {
+                self.appLog("ack \(one.sessionId) state=\(one.state) host=\(one.host ?? "-") via=\(front)")
+                StateStore.markAcknowledged(one.sessionId)
             }
         }
     }
