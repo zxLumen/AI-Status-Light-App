@@ -195,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = changed
         applyDisplay()
         if rotationTimer == nil { scheduleRotation() }
+        if let am = appState?.mode, am != displayMode() { dbg("MISMATCH appState=\(am) display=\(displayMode())") }
         trackInterrupts(records)
         pollTick &+= 1
         if pollTick % 4 == 0 { acknowledgeFocused() }
@@ -220,15 +221,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard ids.contains(front) else { continue }
                 var verified = false
                 if front.hasPrefix("com.microsoft.VSCode") {
-                    if trusted, let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId), !dir.isEmpty {
+                    if trusted, let title = WindowFocuser.focusedWindowTitle(bundleId: front),
+                       let dir = rec.dir ?? OpenCodeDB.sessionDirectory(rec.sessionId), !dir.isEmpty {
                         let folder = (dir as NSString).lastPathComponent
-                        verified = !folder.isEmpty
-                            && (WindowFocuser.focusedWindowTitle(bundleId: front) ?? "")
-                                .localizedCaseInsensitiveContains(folder)
+                        verified = !folder.isEmpty && title.localizedCaseInsensitiveContains(folder)
+                    } else {
+                        verified = true   // can't read the window → app-level
                     }
                 } else if front == "com.googlecode.iterm2" {
                     if let r = rec.ref, !r.isEmpty, let cur = ITermFocus.currentSessionRef() {
                         verified = (cur == r)
+                    } else {
+                        verified = true   // no Automation/ref → app-level
                     }
                 } else if front == "ai.opencode.desktop" {
                     verified = true

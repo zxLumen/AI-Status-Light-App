@@ -13,8 +13,10 @@ final class AppState: ObservableObject {
         self.contract = contract
     }
 
+    /// Note: `mode` is owned by the app's rotation/display logic, not the
+    /// aggregate — so it is deliberately NOT set here (otherwise the floating
+    /// light would snap back to the top-priority mode every poll).
     func update(_ agg: Aggregate) {
-        mode = agg.mode
         reason = agg.reason
         sessions = agg.sessions
         manual = agg.manual
