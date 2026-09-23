@@ -107,6 +107,7 @@
   - `store.write_event` / `touch` 全程对 `sessions/<sid>.json.lock` 加 `fcntl` 排他锁
   - 插件对 `permission.asked/updated`、`question.asked` 在 **400ms 后重发一次**(更高 seq),
     并在 replied/idle 时取消
+  - 清理会话时一并删除 `.lock` 文件(store.clear / StateStore.clearSession)
   - 验证:并发竞争测试 无锁 30 次错 10 次 → 加锁后 0 次
 
 ### Fixed

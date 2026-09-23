@@ -229,7 +229,7 @@ def clear(session_id=None):
     ensure_dirs()
     if session_id is None:
         for name in os.listdir(sessions_dir()):
-            if name.endswith(".json") or name.endswith(".tmp"):
+            if name.endswith((".json", ".tmp", ".lock")):
                 try:
                     os.remove(os.path.join(sessions_dir(), name))
                 except OSError:
@@ -249,7 +249,8 @@ def clear(session_id=None):
         return
     base = _path(session_id)
     for name in os.listdir(sessions_dir()):
-        if name == os.path.basename(base) or name.startswith(os.path.basename(base) + ".") and name.endswith(".tmp"):
+        if name == os.path.basename(base) or (name.startswith(os.path.basename(base) + ".")
+                                                       and name.endswith((".tmp", ".lock"))):
             try:
                 os.remove(os.path.join(sessions_dir(), name))
             except OSError:

@@ -119,6 +119,7 @@ enum StateStore {
         let safe = sessionId.map { $0.isLetter || $0.isNumber || "-_.".contains($0) ? $0 : "_" }
         let url = sessionsDir.appendingPathComponent(String(safe) + ".json")
         try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(atPath: url.path + ".lock")
     }
 
     /// Drop entries for removed sessions from the name / dir / host side-tables,
