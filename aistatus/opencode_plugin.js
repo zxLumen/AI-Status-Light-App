@@ -143,6 +143,29 @@ function forward(eventType, properties) {
   }
 }
 
+// A permission / question prompt is usually announced milliseconds *before* the
+// `tool.execute.before` "busy" that triggered it. Re-sending the blocked event a
+// moment later gives it a higher `seq`, so "blocked" always wins the store's
+// ordering even when the two hook processes race.
+const REINFORCE_MS = 400;
+const reinforceTimers = new Map();
+
+function cancelReinforce(sid) {
+  const t = reinforceTimers.get(sid);
+  if (t) { clearTimeout(t); reinforceTimers.delete(sid); }
+}
+
+function reinforce(eventType, properties, sid) {
+  cancelReinforce(sid);
+  const t = setTimeout(() => {
+    reinforceTimers.delete(sid);
+    if (!pendingQuestion.has(sid) && !pendingPermission.has(sid)) return;   // already answered
+    log(`reinforce ${eventType} sid=${sid}`);
+    forward(eventType, properties);
+  }, REINFORCE_MS);
+  reinforceTimers.set(sid, t);
+}
+
 function pick(value, ...keys) {
   for (const k of keys) if (value?.[k] != null) return value[k];
   return undefined;
@@ -192,8 +215,13 @@ export const AistatusPlugin = async () => {
       const dir = info.directory ?? props.directory;
 
       // A permission prompt keeps the session blocked; remember it.
-      if (type === "permission.asked" || type === "permission.updated") pendingPermission.add(sessionID);
-      else if (type === "permission.replied") pendingPermission.delete(sessionID);
+      if (type === "permission.asked" || type === "permission.updated") {
+        pendingPermission.add(sessionID);
+        reinforce(type, { ...props, sessionID, session_name: title, session_dir: dir }, sessionID);
+      } else if (type === "permission.replied") {
+        pendingPermission.delete(sessionID);
+        cancelReinforce(sessionID);
+      }
 
       // The `question` tool blocks on the user choosing an option — surface it as
       // blocked (opencode keeps session.status busy, so it needs special handling).
@@ -220,10 +248,13 @@ export const AistatusPlugin = async () => {
               lastQuestion.set(qid, "running");
               const text = part.state?.input?.questions?.[0]?.question ?? null;
               log(`question.asked sid=${sessionID} ${JSON.stringify(text)}`);
-              forward("question.asked", { sessionID, message: text, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status: "running" } } });
+              const props2 = { sessionID, message: text, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status: "running" } } };
+              forward("question.asked", props2);
+              reinforce("question.asked", props2, sessionID);
             }
           } else if (status === "completed" || status === "error") {
             pendingQuestion.delete(sessionID);
+            cancelReinforce(sessionID);
             if (lastQuestion.get(qid) !== "done") {
               lastQuestion.set(qid, "done");
               log(`question.replied sid=${sessionID} status=${status}`);
@@ -241,6 +272,7 @@ export const AistatusPlugin = async () => {
         if (st === "idle") {
           pendingQuestion.delete(sessionID);
           pendingPermission.delete(sessionID);
+          cancelReinforce(sessionID);
         } else if (st === "busy" && (pendingQuestion.has(sessionID) || pendingPermission.has(sessionID))) {
           return;
         }

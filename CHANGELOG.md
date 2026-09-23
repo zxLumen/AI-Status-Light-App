@@ -100,6 +100,16 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- **权限申请时灯显示 busy 而非"需要你"**:`tool.execute.before`(busy)比
+  `permission.asked`(blocked)先到 13ms,两者并发写同一个会话文件,而
+  `store.write_event` 的 `seq` 守卫是**非原子的读-判断-写**,旧 seq 的 busy
+  会覆盖新 seq 的 blocked。修复:
+  - `store.write_event` / `touch` 全程对 `sessions/<sid>.json.lock` 加 `fcntl` 排他锁
+  - 插件对 `permission.asked/updated`、`question.asked` 在 **400ms 后重发一次**(更高 seq),
+    并在 replied/idle 时取消
+  - 验证:并发竞争测试 无锁 30 次错 10 次 → 加锁后 0 次
+
+### Fixed
 - Bark 设置框**长地址被折行显示**:字段改为单行(可滚动、超长中间省略)并加宽;
   提示文案不再写死 `api.day.app`
 - **自建 Bark 服务器**的地址不再预填失败:预填判定改为"http(s) 开头即认";

@@ -1,8 +1,10 @@
 """Session state store. Hooks write tiny JSON files here; the daemon reads them."""
 
+import fcntl
 import json
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 
@@ -33,6 +35,26 @@ def now_ts():
     return time.time()
 
 
+@contextmanager
+def _locked(session_id):
+    """Serialize read-check-write on one session across concurrent hook processes.
+
+    Without this the `seq` guard is a lost-update race: two hooks can both read
+    the pre-event record and the *older* one can land last, clobbering a newer
+    state (e.g. a `busy` overwriting the `blocked` of a permission prompt).
+    """
+    ensure_dirs()
+    fd = os.open(_path(session_id) + ".lock", os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 def iso(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -40,17 +62,6 @@ def iso(ts):
 def write_event(session_id, agent, state, message=None, ts=None, seq=None):
     ensure_dirs()
     path = _path(session_id)
-    # Ignore out-of-order writes: concurrent hook processes may finish in the
-    # wrong order (e.g. a stale "busy" landing after "idle").
-    if seq is not None and os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as f:
-                existing = json.load(f)
-            old = existing.get("seq")
-            if isinstance(old, (int, float)) and seq < old:
-                return existing
-        except (OSError, ValueError):
-            pass
     ts = ts or now_ts()
     record = {
         "session_id": str(session_id),
@@ -61,10 +72,22 @@ def write_event(session_id, agent, state, message=None, ts=None, seq=None):
         "at": iso(ts),
         "seq": seq,
     }
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(record, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    with _locked(session_id):
+        # Ignore out-of-order writes: concurrent hook processes may finish in the
+        # wrong order (e.g. a stale "busy" landing after "idle").
+        if seq is not None and os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    existing = json.load(f)
+                old = existing.get("seq")
+                if isinstance(old, (int, float)) and seq < old:
+                    return existing
+            except (OSError, ValueError):
+                pass
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(record, f, ensure_ascii=False)
+        os.replace(tmp, path)
     return record
 
 
@@ -186,18 +209,19 @@ def touch(session_id, ts=None):
     path = _path(session_id)
     if not os.path.exists(path):
         return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            rec = json.load(f)
-    except (OSError, ValueError):
-        return None
     ts = ts or now_ts()
-    rec["ts"] = ts
-    rec["at"] = iso(ts)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(rec, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    with _locked(session_id):
+        try:
+            with open(path, encoding="utf-8") as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            return None
+        rec["ts"] = ts
+        rec["at"] = iso(ts)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False)
+        os.replace(tmp, path)
     return rec
 
 

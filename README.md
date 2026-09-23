@@ -178,6 +178,10 @@ aistatus install-hooks --agent all
   - `sessions/*.json` 每个会话的最近状态
   - `names.json` 会话名(opencode 标题)
   - `override.json` 手动覆盖
+- **并发写入安全**:hook 是并发子进程,`write_event`/`touch` 会对 `sessions/<sid>.json.lock`
+  加排他锁,`seq` 守卫(高 seq 胜出)因此不会丢更新
+- **权限/提问不会被 busy 覆盖**:`permission.asked`/`question.asked` 会在 400ms 后
+  **重发一次**(更高 `seq`),即使与触发它的 `tool.before`(busy)竞争也能保证显示"需要你"
 - 契约:`aistatus/states.json`(优先级 / TTL / 颜色 / 标签),构建时复制进 App 的 `Contents/Resources`;运行时会优先读 `AISTATUS_CONTRACT` 或仓库内的同名文件,便于开发。
 
 ## 目录结构
