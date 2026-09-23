@@ -89,7 +89,8 @@ macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(
 用 **Bark**(iPhone 免费 App,开源,可自建):
 
 1. iPhone 安装 **Bark**,打开 → 复制 key(其 URL 尾部那串)
-2. 菜单 **手机推送 → 设置 Bark…** → 粘贴完整地址 `https://api.day.app/<KEY>` 或只填 `<KEY>` → 保存
+2. 菜单 **手机推送 → 设置 Bark…** → 粘贴完整地址(官方 `https://api.day.app/<KEY>` **或自建服务器**如 `https://bark.example.cn/<KEY>`)或只填 `<KEY>` → 保存
+   - 剪贴板里已是地址/key 时会**自动预填**;复制导致的**换行/空格会被自动去掉**
 3. 保存后会自动发一条**测试推送**;手机收到即成功(手表需在 Garmin/其它手表 App 里允许转发该 App 的通知)
 
 细节:

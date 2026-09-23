@@ -59,12 +59,21 @@ struct PushConfig: Codable {
         try? data.write(to: PushConfig.path)
     }
 
-    /// Accept a bare Bark key as well as a full URL.
+    /// Accept a bare Bark key as well as a full URL (official or self-hosted).
+    /// Wrapped clipboard copies often carry stray newlines/spaces, so drop all
+    /// whitespace before using it.
     static func normalizedURL(_ raw: String) -> String {
-        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = raw.components(separatedBy: .whitespacesAndNewlines).joined()
         if s.isEmpty { return "" }
         if s.lowercased().hasPrefix("http") { return s }
         return "https://api.day.app/" + s.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Does this clipboard text look like a Bark endpoint/key worth prefilling?
+    static func looksLikeEndpoint(_ clip: String) -> Bool {
+        let s = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.lowercased().hasPrefix("http") { return true }
+        return s.count >= 16 && s.count <= 40 && s.allSatisfy { $0.isLetter || $0.isNumber }
     }
 }
 

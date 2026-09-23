@@ -850,23 +850,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Prefill from the clipboard when it already holds a Bark key/URL, so
         // pasting is optional.
         var prefill = cfg.url
-        if let clip = NSPasteboard.general.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !clip.contains("\n") {
-            let looksLikeKey = clip.lowercased().contains("day.app")
-                || (clip.count >= 16 && clip.count <= 40
-                    && clip.allSatisfy { $0.isLetter || $0.isNumber })
-            if looksLikeKey { prefill = clip }
+        if let clip = NSPasteboard.general.string(forType: .string),
+           PushConfig.looksLikeEndpoint(clip) {
+            prefill = PushConfig.normalizedURL(clip)
         }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Bark 推送设置"
-        alert.informativeText = "在 iPhone 的 Bark App 里复制 key,粘贴到下面(⌘V;已自动读取剪贴板)。\n" +
-            "可填完整地址 https://api.day.app/<KEY>,也可只填 <KEY>。"
+        alert.informativeText = "粘贴 Bark 的完整地址(官方 api.day.app 或自建服务器),也可以只填 key。\n"
+            + "已自动读取剪贴板,可直接 ⌘V 覆盖。"
         alert.addButton(withTitle: "保存")
         alert.addButton(withTitle: "取消")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
         field.stringValue = prefill
         field.placeholderString = "https://api.day.app/<KEY>"
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.lineBreakMode = .byTruncatingMiddle
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         NSApp.activate(ignoringOtherApps: true)
