@@ -217,7 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// window/tab (a frontmost transition) — not merely because they're on it.
     private func acknowledgeFocused() {
         guard UserDefaults.standard.object(forKey: "ui.ackOnFocus") as? Bool ?? true else { return }
-        let pending = allSessions.filter { $0.state == "success" || $0.state == "error" }
+        let pending = allSessions.filter {
+            ($0.state == "success" || $0.state == "error") && $0.ack != true
+        }
         guard !pending.isEmpty else { return }
         ackQueue.async { [weak self] in
             guard let self, let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
@@ -261,11 +263,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.appLog("ack? \(rec.sessionId) verified=\(verified) \(why)")
                 if verified { verifiedRecs.append(rec) }
             }
-            // Several sessions can map to the same window (same project folder) —
-            // acknowledge only the most recent one per switch.
-            if let one = verifiedRecs.max(by: { $0.ts < $1.ts }) {
-                self.appLog("ack \(one.sessionId) state=\(one.state) host=\(one.host ?? "-") via=\(front)")
-                StateStore.markAcknowledged(one.sessionId)
+            // Acknowledge every un-acked session that belongs to the window just
+            // switched to (they were all visible there). Already-acked sessions
+            // are excluded above, so this can never re-ack the same one forever.
+            for rec in verifiedRecs {
+                self.appLog("ack \(rec.sessionId) state=\(rec.state) host=\(rec.host ?? "-") via=\(front)")
+                StateStore.markAcknowledged(rec.sessionId)
             }
         }
     }
