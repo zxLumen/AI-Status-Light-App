@@ -8,6 +8,23 @@ const PY = __PY__;
 const AI_STATUS_HOME = __AI_STATUS_HOME__;
 const ALLOWED = __EVENTS__;
 const LOG = path.join(AI_STATUS_HOME, "opencode.log");
+const BLOCKED = path.join(AI_STATUS_HOME, "blocked.json");
+let blockedCache = { at: 0, set: new Set() };
+
+// Muted sessions (written by the menu bar app) are dropped before spawning a hook.
+function isBlocked(sid) {
+  const now = Date.now();
+  if (now - blockedCache.at > 2000) {
+    let set = new Set();
+    try {
+      const obj = JSON.parse(fs.readFileSync(BLOCKED, "utf8"));
+      set = new Set(Object.keys(obj || {}));
+    } catch (e) {}
+    blockedCache = { at: now, set };
+  }
+  return blockedCache.set.has(sid);
+}
+
 const lastTitle = new Map();
 const lastDir = new Map();
 const lastQuestion = new Map();   // part id -> last status we forwarded
@@ -96,8 +113,10 @@ function safeStringify(value) {
 const HOOK_TIMEOUT_MS = 8000;
 
 function forward(eventType, properties) {
+  const sid = properties.sessionID ?? properties.sessionId ?? null;
+  if (sid && isBlocked(sid)) return;                 // muted → never monitored
   const payload = safeStringify({
-    session_id: properties.sessionID ?? properties.sessionId ?? null,
+    session_id: sid,
     session_name: properties.session_name ?? null,
     session_dir: properties.session_dir ?? properties.info?.directory ?? properties.directory ?? null,
     session_host: HOST,

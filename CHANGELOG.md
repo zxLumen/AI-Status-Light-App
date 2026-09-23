@@ -6,6 +6,13 @@
 ## [Unreleased]
 
 ### Added
+- **屏蔽会话(不再监听)**:菜单「会话管理 → 屏蔽会话…」按**会话 id** 屏蔽,写入
+  `~/.ai-status-light/blocked.json`,并立即删除其状态文件;屏蔽后**菜单/灯/气泡/推送/确认全部忽略**
+  - 桥接 `store.blocked_ids()` 在 `cmd_hook`/`touch`/`read_sessions` 处跳过
+  - opencode 插件 `isBlocked()` 在 `forward()` 处跳过(不再 spawn hook 进程,需重启 opencode)
+  - 「已屏蔽 (N)…」点击取消;「清空屏蔽列表」一键清除
+
+### Added
 - Bark 请求带上 `id` 参数(`?id=`),可选模式 `push.json.idMode`:
   `random`(默认,随机数,每条独立)/ `stable`(`会话id|状态`,同一条会更新,重复投递只留一条)/ `off`
 - 推送日志带上 `id`,便于排查

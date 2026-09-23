@@ -86,6 +86,12 @@ def _session_dir(payload, agent):
 
 def cmd_hook(args):
     payload = _read_payload()
+    # Muted sessions are never monitored again — drop the event as early as possible.
+    early = _first(payload, "session_id", "sessionId", "conversation_id", "thread_id", "id")
+    if early and str(early) in store.blocked_ids():
+        if args.verbose:
+            print(f"hook: session {early} is blocked, skipping", file=sys.stderr)
+        return 0
     if str(payload.get("event") or "").lower() == "heartbeat":
         sid = _first(payload, "session_id", "sessionId", "conversation_id", "thread_id", "id")
         if sid:

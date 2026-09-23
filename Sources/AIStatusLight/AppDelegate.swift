@@ -321,6 +321,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         all.target = self
         sub.addItem(all)
 
+        // Blocked (ignored) sessions: never monitored again.
+        sub.addItem(.separator())
+        let blockSub = NSMenu()
+        let now = Date().timeIntervalSince1970
+        for rec in StateStore.menuOrder(allSessions, now: now, contract: contract) {
+            let label = (rec.name?.isEmpty == false) ? rec.name! : rec.agent
+            let it = NSMenuItem(title: "\(label) — \(rec.state)",
+                                action: #selector(blockSession(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = rec.sessionId
+            blockSub.addItem(it)
+        }
+        if blockSub.items.isEmpty { blockSub.addItem(disabled(gray("（无会话）"))) }
+        let blockItem = NSMenuItem(title: "屏蔽会话…", action: nil, keyEquivalent: "")
+        blockItem.submenu = blockSub
+        sub.addItem(blockItem)
+
+        let muted = StateStore.blocked()
+        let unblockSub = NSMenu()
+        for (sid, info) in muted.sorted(by: { ($0.value.ts ?? 0) > ($1.value.ts ?? 0) }) {
+            let label = (info.name?.isEmpty == false) ? info.name! : sid
+            let it = NSMenuItem(title: label, action: #selector(unblockSession(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = sid
+            unblockSub.addItem(it)
+        }
+        if unblockSub.items.isEmpty { unblockSub.addItem(disabled(gray("（无）"))) }
+        let unblockItem = NSMenuItem(title: "已屏蔽 (\(muted.count))…", action: nil, keyEquivalent: "")
+        unblockItem.submenu = unblockSub
+        sub.addItem(unblockItem)
+        let clearB = NSMenuItem(title: "清空屏蔽列表", action: #selector(clearBlockedSessions), keyEquivalent: "")
+        clearB.target = self
+        sub.addItem(clearB)
+
         let item = NSMenuItem(title: "会话管理", action: nil, keyEquivalent: "")
         item.submenu = sub
         return item
@@ -339,6 +373,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func pruneOldSessions() {
         let n = StateStore.pruneKeepingNewest(Self.sessionKeep)
         appLog("prune old removed=\(n) keep=\(Self.sessionKeep)")
+        poll()
+    }
+
+    @objc private func blockSession(_ sender: NSMenuItem) {
+        guard let sid = sender.representedObject as? String else { return }
+        let rec = allSessions.first { $0.sessionId == sid }
+        StateStore.block(sid, name: rec?.name, dir: rec?.dir)
+        appLog("block session=\(sid) name=\(rec?.name ?? rec?.agent ?? "-")")
+        poll()
+    }
+
+    @objc private func unblockSession(_ sender: NSMenuItem) {
+        guard let sid = sender.representedObject as? String else { return }
+        StateStore.unblock(sid)
+        appLog("unblock session=\(sid)")
+        poll()
+    }
+
+    @objc private func clearBlockedSessions() {
+        StateStore.clearBlocked()
+        appLog("block list cleared")
         poll()
     }
 

@@ -35,6 +35,23 @@ def now_ts():
     return time.time()
 
 
+def blocked_path():
+    return os.path.join(home_dir(), "blocked.json")
+
+
+def blocked_ids():
+    """Sessions the user has muted: never written to or monitored again."""
+    path = blocked_path()
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return set(str(k) for k in data) if isinstance(data, dict) else set()
+    except (OSError, ValueError):
+        return set()
+
+
 @contextmanager
 def _locked(session_id):
     """Serialize read-check-write on one session across concurrent hook processes.
@@ -96,6 +113,7 @@ def read_sessions(max_age=None):
     names = session_names()
     dirs = session_dirs()
     hosts = session_hosts()
+    muted = blocked_ids()
     out = []
     cutoff = None if max_age is None else now_ts() - max_age
     for name in os.listdir(sessions_dir()):
@@ -109,6 +127,8 @@ def read_sessions(max_age=None):
         if cutoff is not None and rec.get("ts", 0) < cutoff:
             continue
         sid = str(rec.get("session_id"))
+        if sid in muted:
+            continue
         rec["name"] = names.get(sid)
         rec["dir"] = dirs.get(sid)
         h = hosts.get(sid) or {}
@@ -208,6 +228,8 @@ def touch(session_id, ts=None):
     """Refresh a session's timestamp without changing its state (heartbeat)."""
     path = _path(session_id)
     if not os.path.exists(path):
+        return None
+    if str(session_id) in blocked_ids():
         return None
     ts = ts or now_ts()
     with _locked(session_id):

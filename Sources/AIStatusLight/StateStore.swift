@@ -76,11 +76,13 @@ enum StateStore {
         let names = names()
         let dirs = dirs()
         let hosts = hosts()
+        let muted = blocked()
         var out: [SessionRecord] = []
         let decoder = JSONDecoder()
         for url in items where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   var rec = try? decoder.decode(SessionRecord.self, from: data) else { continue }
+            if muted[rec.sessionId] != nil { continue }     // blocked: never monitored
             rec.name = names[rec.sessionId]
             if rec.dir == nil { rec.dir = dirs[rec.sessionId] }
             rec.host = hosts[rec.sessionId]?.host
@@ -88,6 +90,48 @@ enum StateStore {
             out.append(rec)
         }
         return out
+    }
+
+    // MARK: - Blocked sessions (ignored entirely, persistently)
+
+    struct BlockedEntry: Codable {
+        var name: String?
+        var dir: String?
+        var ts: Double?
+    }
+
+    static var blockedPath: URL { home.appendingPathComponent("blocked.json") }
+
+    static func blocked() -> [String: BlockedEntry] {
+        guard let data = try? Data(contentsOf: blockedPath),
+              let map = try? JSONDecoder().decode([String: BlockedEntry].self, from: data) else { return [:] }
+        return map
+    }
+
+    /// Stop monitoring a session: remember it and drop its current state file so
+    /// it disappears immediately. Future events are ignored by the bridge too.
+    static func block(_ sessionId: String, name: String?, dir: String?) {
+        var map = blocked()
+        map[sessionId] = BlockedEntry(name: name, dir: dir, ts: Date().timeIntervalSince1970)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(map) {
+            try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+            try? data.write(to: blockedPath)
+        }
+        clearSession(sessionId)
+    }
+
+    static func unblock(_ sessionId: String) {
+        var map = blocked()
+        map.removeValue(forKey: sessionId)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(map) { try? data.write(to: blockedPath) }
+    }
+
+    static func clearBlocked() {
+        try? FileManager.default.removeItem(at: blockedPath)
     }
 
     struct Override { let mode: String; let ts: Double; let ttl: Double? }
