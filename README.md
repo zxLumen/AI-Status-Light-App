@@ -13,10 +13,10 @@
 
 ## 完整演示
 
-一段完整走查(4× 加速):在 VS Code / opencode 里跑任务,菜单栏灯与**悬浮红绿灯**随状态变化;
+一段完整走查(2× 加速):在 VS Code / opencode 里跑任务,菜单栏灯与**悬浮红绿灯**随状态变化;
 打开下拉菜单看**会话列表 / 会话管理 / 悬浮灯选项 / 手机推送**,并操作**悬浮灯**(拖动、缩放、固定、悬停变透明)。
 
-<img src="docs/images/demo-full.gif" width="720" alt="AI Status Light 完整演示">
+<img src="docs/images/demo-full.gif" width="900" alt="AI Status Light 完整演示">
 
 ## 特性
 
