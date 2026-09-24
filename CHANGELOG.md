@@ -6,6 +6,10 @@
 ## [Unreleased]
 
 ### Added
+- README 增加**完整演示 GIF**(`docs/images/demo-full.gif`,640×416、10fps、4× 加速、约 4.8MB),
+  走查:VS Code/opencode 跑任务 → 菜单栏灯与悬浮红绿灯 → 会话列表/会话管理/悬浮灯/手机推送
+
+### Added
 - **屏蔽会话(不再监听)**:菜单「会话管理 → 屏蔽会话…」按**会话 id** 屏蔽,写入
   `~/.ai-status-light/blocked.json`,并立即删除其状态文件;屏蔽后**菜单/灯/气泡/推送/确认全部忽略**
   - 桥接 `store.blocked_ids()` 在 `cmd_hook`/`touch`/`read_sessions` 处跳过
