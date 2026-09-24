@@ -14,3 +14,8 @@ Resources/AppIcon.iconset/
 
 # 录屏原文件
 *.mov
+
+# README 媒体托管在 GitHub Releases(见 make assets),不入库
+docs/images/*.gif
+docs/images/*.jpg
+docs/images/icon-1024.png

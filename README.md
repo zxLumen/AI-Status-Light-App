@@ -1,6 +1,6 @@
 # AI Status Light
 
-<img src="docs/images/icon-1024.png" width="120" align="right" alt="App 图标">
+<img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/icon-1024.png" width="120" align="right" alt="App 图标">
 
 一盏住在 macOS **菜单栏**的红绿灯:实时映射你的 AI 编程 agent 正在干什么——**在干活**、**干完了**、还是**在等你**。不用再盯着终端。
 
@@ -16,7 +16,7 @@
 一段完整走查(2× 加速):在 VS Code / opencode 里跑任务,菜单栏灯与**悬浮红绿灯**随状态变化;
 打开下拉菜单看**会话列表 / 会话管理 / 悬浮灯选项 / 手机推送**,并操作**悬浮灯**(拖动、缩放、固定、悬停变透明)。
 
-<img src="docs/images/demo-full.gif" width="900" alt="AI Status Light 完整演示">
+<img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/demo-full.gif" width="900" alt="AI Status Light 完整演示">
 
 ## 特性
 
@@ -41,17 +41,17 @@
 
 | working | success |
 |---|---|
-| <img src="docs/images/demo-menu-working.gif" width="330" alt="菜单 · working"> | <img src="docs/images/menu-success.jpg" width="330" alt="菜单 · success"> |
+| <img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/demo-menu-working.gif" width="330" alt="菜单 · working"> | <img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/menu-success.jpg" width="330" alt="菜单 · success"> |
 
 | idle | needs you(等你选择) |
 |---|---|
-| <img src="docs/images/menu-idle.jpg" width="330" alt="菜单 · idle"> | <img src="docs/images/demo-menu-blocked.gif" width="330" alt="菜单 · needs you"> |
+| <img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/menu-idle.jpg" width="330" alt="菜单 · idle"> | <img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/demo-menu-blocked.gif" width="330" alt="菜单 · needs you"> |
 
 ## 悬浮红绿灯
 
 一个透明、置顶的三灯组件,窗口切来切去都在最上层。
 
-<img src="docs/images/floating-shell.jpg" width="220" alt="悬浮红绿灯 · 圆角外壳">
+<img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/floating-shell.jpg" width="220" alt="悬浮红绿灯 · 圆角外壳">
 
 - **显示/隐藏**:菜单「显示悬浮灯」;启动默认显示
 - **移动**:直接拖拽
@@ -68,8 +68,8 @@
 
 任务进入**关键状态**时,菜单栏图标正下方弹出一个气泡:
 
-<img src="docs/images/demo-bubble-question.gif" width="320" alt="等你选择(needs you)">
-<img src="docs/images/bubble-success.jpg" width="320" alt="完成(success)">
+<img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/demo-bubble-question.gif" width="320" alt="等你选择(needs you)">
+<img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/bubble-success.jpg" width="320" alt="完成(success)">
 
 - 显示 **状态 + agent + 会话名**;若是工具在问你问题(如 opencode 的 `question`),还会显示**问题文本**
 - 停留 **8s** 后自动淡出(菜单「气泡停留」可选 2/4/8s)
@@ -127,6 +127,7 @@ macOS App ──HTTPS──▶ api.day.app ──▶ iPhone 通知 ──蓝牙(
 ```bash
 make build     # swift build -c release
 make icon      # 重新生成 App 图标(Resources/AppIcon.icns + docs/images/icon-1024.png)
+make assets    # 把 README 用的图片/GIF 上传到 GitHub Release(不入库)
 make bundle    # 组装 "build/AI Status Light.app"(稳定签名,回退 ad-hoc)
 make run       # 构建并打开 App
 make install   # 构建并安装到 /Applications 后打开(推荐)
@@ -203,8 +204,11 @@ Resources/Info.plist          打包用 Info.plist
 Resources/AppIcon.icns        App 图标(由 scripts/make-icon.swift 生成)
 scripts/bundle.sh             组装 .app + 稳定签名(回退 ad-hoc)
 scripts/make-icon.swift       矢量绘制 App 图标并打包 .icns(含推送用 icon-256.png)
+scripts/upload-assets.sh      上传 README 媒体到 GitHub Release(不入库)
 aistatus/                     主机桥接(Python):hooks、状态仓库、聚合
 ```
+
+> README 里的图片/GIF 托管在 **GitHub Release `assets`**,不在仓库里;更新用 `make assets`。
 
 ## 备注
 

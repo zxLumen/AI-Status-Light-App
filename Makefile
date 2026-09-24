@@ -1,4 +1,4 @@
-.PHONY: build bundle icon run install clean
+.PHONY: build bundle icon assets run install clean
 
 APP := AI Status Light
 
@@ -8,6 +8,10 @@ build:
 # Regenerate Resources/AppIcon.icns + docs/images/icon-1024.png
 icon:
 	swift scripts/make-icon.swift
+
+# Upload README media (docs/images/*) to the GitHub Release "assets"
+assets:
+	./scripts/upload-assets.sh
 
 bundle:
 	./scripts/bundle.sh

@@ -82,6 +82,12 @@
 - 已完成且在看的窗口:不再弹 success/error 气泡
 
 ### Changed
+- **README 媒体移出 git**:图片/GIF 改由 **GitHub Release `assets`** 托管
+  (`https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/<file>`),
+  仓库不再 push/pull 这些二进制;`make assets`(`scripts/upload-assets.sh`)一键上传/覆盖,URL 不变
+  - 保留在仓库:`Resources/AppIcon.icns`(构建必需)、`docs/images/icon-256.png`(Bark 图标 URL)
+
+### Changed
 - **改用稳定签名**:`bundle.sh` 优先使用本机 codesigning 证书(Apple Development),
   替代 ad-hoc 签名,使 macOS TCC(辅助功能/自动化)授权在重建后不再失效
 - 菜单新增「辅助功能:已授权 / 未授权」状态行(点击去授权)
