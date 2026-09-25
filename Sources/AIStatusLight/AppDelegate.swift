@@ -26,6 +26,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let ackQueue = DispatchQueue(label: "aistatus.ack")
     private var lastFrontKey: String?
 
+    // Menu live-refresh (only the session rows are rebuilt while the menu is open)
+    private static let sessionRowTag = 9001
+    private var menuOpen = false
+    private var lastMenuSignature = ""
+    private var lastSessionSetSig = ""
+    private weak var headerItem: NSMenuItem?
+    private weak var reasonItem: NSMenuItem?
+
     private var last = Aggregate(mode: "idle", state: "idle", reason: "starting",
                                  sessions: [], manual: false)
     private var allSessions: [SessionRecord] = []
@@ -92,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.poll()
         }
         RunLoop.main.add(t, forMode: .common)
+        RunLoop.main.add(t, forMode: .eventTracking)   // keep polling while a menu is open
         pollTimer = t
 
         if debug {
@@ -210,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let transitions = stateTransitions()
         maybeBubble(transitions)
         maybePush(transitions)
+        if menuOpen { refreshMenuLive() }
     }
 
     /// Clear a finished/failed session once its window is brought to the front.
@@ -576,44 +586,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let mode = last.mode   // menu header shows the top-priority state, not the rotating one
 
-        menu.addItem(disabled(line(contract.colorHex(mode),
-                                   contract.label(mode) + (last.manual ? " · 手动" : ""))))
-        menu.addItem(disabled(gray(last.reason)))
+        let head = disabled(line(contract.colorHex(mode),
+                                 contract.label(mode) + (last.manual ? " · 手动" : "")))
+        let reason = disabled(gray(last.reason))
+        headerItem = head
+        reasonItem = reason
+        menu.addItem(head)
+        menu.addItem(reason)
         menu.addItem(.separator())
 
-        if allSessions.isEmpty {
-            menu.addItem(disabled(gray("无会话")))
-        } else {
-            let now = Date().timeIntervalSince1970
-            let ordered = StateStore.menuOrder(allSessions, now: now, contract: contract)
-            let limit = UserDefaults.standard.object(forKey: "ui.sessionLimit") as? Int ?? 10  // 0 = 不限
-            let shown = limit > 0 ? Array(ordered.prefix(limit)) : ordered
-            dbg("menu sessions shown=\(shown.count)/\(ordered.count) limit=\(limit)")
-            for rec in shown {
-                let color = contract.colorHex(contract.mode(for: rec.state))
-                let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
-                let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)
-                let item = NSMenuItem(title: "\(label) — \(rec.state)",
-                                      action: #selector(jumpAgent(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = ["agent": rec.agent, "dir": rec.dir ?? "",
-                                          "sid": rec.sessionId, "host": rec.host ?? "",
-                                          "ref": rec.ref ?? ""] as NSDictionary
-                var title = line(color, "\(label) — \(rec.state)")
-                if !fresh {
-                    let dim = NSMutableAttributedString(attributedString: title)
-                    dim.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
-                                     range: NSRange(location: 0, length: dim.length))
-                    title = dim
-                }
-                item.attributedTitle = title
-                item.toolTip = AppLauncher.canJump(agent: rec.agent) ? "点击跳到 \(rec.agent)" : "点击打开状态面板"
-                menu.addItem(item)
-            }
-            if ordered.count > shown.count {
-                menu.addItem(disabled(gray("…还有 \(ordered.count - shown.count) 个会话(会话管理里可调)")))
-            }
-        }
+        for item in makeSessionItems() { menu.addItem(item) }
 
         menu.addItem(.separator())
         menu.addItem(action("演示(Demo)", #selector(startDemo)))
@@ -737,6 +719,131 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("退出", #selector(quit), key: "q"))
+
+        lastMenuSignature = menuSignature()
+        lastSessionSetSig = sessionSetSignature()
+    }
+
+    // MARK: - Live menu refresh (session rows only)
+
+    func menuWillOpen(_ menu: NSMenu) { menuOpen = true }
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        headerItem = nil
+        reasonItem = nil
+    }
+
+    /// Ordered sessions to list (respecting the user's display limit).
+    private func sessionList() -> (shown: [SessionRecord], total: Int) {
+        guard !allSessions.isEmpty else { return ([], 0) }
+        let ordered = StateStore.menuOrder(allSessions, now: Date().timeIntervalSince1970,
+                                           contract: contract)
+        let limit = UserDefaults.standard.object(forKey: "ui.sessionLimit") as? Int ?? 10  // 0 = 不限
+        return (limit > 0 ? Array(ordered.prefix(limit)) : ordered, ordered.count)
+    }
+
+    private func makeSessionRow(_ rec: SessionRecord, now: Double) -> NSMenuItem {
+        let color = contract.colorHex(contract.mode(for: rec.state))
+        let label = (rec.name?.isEmpty == false ? rec.name! : rec.agent)
+        let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)
+        let item = NSMenuItem(title: "\(label) — \(rec.state)",
+                              action: #selector(jumpAgent(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = Self.sessionRowTag
+        item.representedObject = ["agent": rec.agent, "dir": rec.dir ?? "",
+                                  "sid": rec.sessionId, "host": rec.host ?? "",
+                                  "ref": rec.ref ?? ""] as NSDictionary
+        var title = line(color, "\(label) — \(rec.state)")
+        if !fresh {
+            let dim = NSMutableAttributedString(attributedString: title)
+            dim.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+                             range: NSRange(location: 0, length: dim.length))
+            title = dim
+        }
+        item.attributedTitle = title
+        item.toolTip = AppLauncher.canJump(agent: rec.agent) ? "点击跳到 \(rec.agent)" : "点击打开状态面板"
+        return item
+    }
+
+    /// The session block of the menu (rows + "无会话" / "…还有 N 个"), all tagged.
+    private func makeSessionItems() -> [NSMenuItem] {
+        let (shown, total) = sessionList()
+        guard !shown.isEmpty else {
+            let it = disabled(gray("无会话"))
+            it.tag = Self.sessionRowTag
+            return [it]
+        }
+        let now = Date().timeIntervalSince1970
+        var items = shown.map { makeSessionRow($0, now: now) }
+        if total > shown.count {
+            let it = disabled(gray("…还有 \(total - shown.count) 个会话(会话管理里可调)"))
+            it.tag = Self.sessionRowTag
+            items.append(it)
+        }
+        return items
+    }
+
+    private func sessionSetSignature() -> String {
+        let (shown, total) = sessionList()
+        return shown.isEmpty ? "empty" : shown.map { $0.sessionId }.joined(separator: ",") + "#\(total)"
+    }
+
+    private func menuSignature() -> String {
+        let (shown, total) = sessionList()
+        let now = Date().timeIntervalSince1970
+        let rows = shown.map { rec -> String in
+            let fresh = rec.ack != true && now - rec.ts <= contract.ttl(rec.state)
+            return "\(rec.sessionId)|\(rec.state)|\(rec.ack ?? false)|\(rec.name ?? "")|\(fresh)|\(rec.host ?? "")"
+        }.joined(separator: ";")
+        return "\(last.mode)|\(last.manual)|\(last.reason)|\(total)|\(rows)"
+    }
+
+    /// Refresh an already-open menu: header/reason in place, and the session
+    /// block updated in place when only states changed (so an open submenu is
+    /// never collapsed); rebuilt only if the set/order changed.
+    private func refreshMenuLive() {
+        guard let menu else { return }
+        let sig = menuSignature()
+        guard sig != lastMenuSignature else { return }        // throttled: nothing changed
+        let newSet = sessionSetSignature()
+        dbg("menu live refresh setChanged=\(newSet != lastSessionSetSig)")
+
+        let mode = last.mode
+        headerItem?.attributedTitle = line(contract.colorHex(mode),
+                                           contract.label(mode) + (last.manual ? " · 手动" : ""))
+        reasonItem?.attributedTitle = gray(last.reason)
+
+        let rows = menu.items.filter { $0.tag == Self.sessionRowTag }
+        let (shown, total) = sessionList()
+        if newSet == lastSessionSetSig, !rows.isEmpty {
+            let now = Date().timeIntervalSince1970
+            if shown.isEmpty {
+                rows[0].attributedTitle = gray("无会话")
+            } else {
+                for (i, rec) in shown.enumerated() where i < rows.count {
+                    let fresh = makeSessionRow(rec, now: now)
+                    rows[i].attributedTitle = fresh.attributedTitle
+                    rows[i].toolTip = fresh.toolTip
+                    rows[i].representedObject = fresh.representedObject
+                }
+                if rows.count == shown.count + 1 {
+                    rows[rows.count - 1].attributedTitle =
+                        gray("…还有 \(total - shown.count) 个会话(会话管理里可调)")
+                }
+            }
+        } else {
+            replaceSessionRows(in: menu)
+        }
+        lastMenuSignature = sig
+        lastSessionSetSig = newSet
+    }
+
+    private func replaceSessionRows(in menu: NSMenu) {
+        guard let first = menu.items.firstIndex(where: { $0.tag == Self.sessionRowTag }) else { return }
+        for item in menu.items where item.tag == Self.sessionRowTag { menu.removeItem(item) }
+        for (offset, item) in makeSessionItems().enumerated() {
+            menu.insertItem(item, at: min(first + offset, menu.items.count))
+        }
     }
 
     private func line(_ hex: String, _ text: String) -> NSAttributedString {

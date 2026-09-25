@@ -118,6 +118,12 @@
   删除该会话(灯切 idle)并可弹「已中断」气泡
 
 ### Fixed
+- **菜单打开时会话状态不实时更新**:菜单项只在打开那一刻由 `menuNeedsUpdate` 构建一次。
+  现实现 `menuWillOpen/DidClose`,并在 `poll()` 中当菜单打开且数据变化时刷新:
+  头部/原因行**原地改**;会话行在"仅状态/名称变化"时**原地改**(不增删,已展开的子菜单不受影响),
+  仅在"会话集合/顺序变化"时重建该段;poll 计时器显式注册 `.eventTracking` 确保菜单跟踪期间仍触发
+
+### Fixed
 - **权限申请时灯显示 busy 而非"需要你"**:`tool.execute.before`(busy)比
   `permission.asked`(blocked)先到 13ms,两者并发写同一个会话文件,而
   `store.write_event` 的 `seq` 守卫是**非原子的读-判断-写**,旧 seq 的 busy
