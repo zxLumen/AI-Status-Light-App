@@ -42,16 +42,17 @@ const pendingPermission = (G.__aistatusPendingPermission ??= new Set()); // sess
 const inflight = (G.__aistatusInflight ??= new Map());        // sessionID -> running tool count
 const heartbeats = (G.__aistatusHeartbeats ??= new Map());    // sessionID -> interval id
 const metaFetched = (G.__aistatusMetaFetched ??= new Set());  // sessionID -> fetched name/dir via ctx.session.get
-const parentOf = (G.__aistatusParentOf ??= new Map());        // sessionID -> parentID (null = top-level)
 const busyAt = (G.__aistatusBusyAt ??= new Map());            // sessionID -> last "busy" forward (dedupe hook vs event)
 const workAt = (G.__aistatusWorkAt ??= new Map());            // sessionID -> last "working" forward
 const seenEvents = (G.__aistatusSeenEvents ??= new Map());    // event id -> first-seen ts
 const ignored = (G.__aistatusIgnored ??= new Set());          // sessionIDs never tracked
 
-// Sessions that must never show up as a light: opencode sub-sessions (handled
-// via parentID in ensureMeta) and sessions opened in a temporary/system
-// location. The Opentodo app's automatic "check-in" runs live in /var/folders
-// (or /tmp, or $HOME itself); real work happens in a project subdirectory.
+// Sessions opened in a temporary/system location are not real work and never
+// show up as a light. The Opentodo app's automatic "check-in" runs live in
+// /var/folders (or /tmp, or $HOME itself); real work happens in a project
+// subdirectory. Sub-sessions (opencode `subagent` / child sessions) are
+// deliberately NOT filtered: a background subagent, or one waiting on a
+// permission prompt, is often the session that actually needs attention.
 const HOME_DIR = os.homedir();
 function ignoredDir(d) {
   if (!d) return false;
@@ -100,16 +101,16 @@ async function ensureMeta(ctx, sessionID, title, dir) {
     const t = info.title ?? title ?? null;
     const d = info.location?.directory ?? info.directory ?? dir ?? null;
     const p = info.parentID ?? info.parent_id ?? null;
-    parentOf.set(sessionID, p ?? null);
-    // Never track a sub-session, nor a session opened in a temp / home location.
-    if (p || ignoredDir(d)) {
+    // Sub-sessions are tracked on purpose; only a temp / home-root location is
+    // skipped (not real work).
+    if (ignoredDir(d)) {
       ignored.add(sessionID);
-      log(`meta ${sessionID} parent=${p ?? "null"} dir=${JSON.stringify(d)} -> ignored`);
+      log(`meta ${sessionID} dir=${JSON.stringify(d)} -> ignored (temp/home)`);
       forward("session.ignore", { sessionID });
       return;
     }
     if (t) lastTitle.set(sessionID, t);
-    log(`meta ${sessionID} title=${JSON.stringify(t)} dir=${JSON.stringify(d)}`);
+    log(`meta ${sessionID} parent=${p ?? "null"} title=${JSON.stringify(t)} dir=${JSON.stringify(d)}`);
     forward("session.updated", { sessionID, session_name: t, session_dir: d });
   } catch (e) {
     log(`session.get failed ${sessionID}: ${e?.message ?? e}`);
@@ -514,8 +515,8 @@ export default {
             else await onToolAfter(input);
             continue;
           }
-          // Resolve the session first (sub-session / temp dir filtering + name),
-          // so an event can never create a state file for a session we drop.
+          // Resolve the session first (temp-dir filtering + name), so an event
+          // can never create a state file for a session we drop.
           await ensureMeta(ctx, sid,
                            mapped.properties.info?.title ?? mapped.properties.session_name, envDir);
           if (ignored.has(sid)) continue;

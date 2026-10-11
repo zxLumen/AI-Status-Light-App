@@ -95,7 +95,7 @@ enum StateStore {
 
     /// A location that is not real work: the home directory itself, or a system
     /// temporary folder (the Opentodo app's automatic check-ins run there).
-    /// Child / sub-sessions are filtered in the opencode plugin instead.
+    /// Sub-sessions are intentionally kept: see the opencode plugin.
     static func isIgnoredDir(_ dir: String?) -> Bool {
         guard let d = dir, !d.isEmpty else { return false }
         if d == FileManager.default.homeDirectoryForCurrentUser.path { return true }

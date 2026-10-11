@@ -16,11 +16,11 @@
   热重载后必然重新注册)
 - opencode v2 另有公开的 `session.tool.called/success/failed` 事件;现也直接映射为 busy/working,
   与 hook 通道在 800ms 内去重,作为 hook 缺失(按项目/location 作用域)时的兜底
-- **不再把 opencode 子会话 / 临时位置会话当成灯**:子会话(父 `parentID` 非空)以及位于临时位置的会话
-  (`/tmp`、`/private/tmp`、`/var/folders`、`/private/var/folders`,或 `$HOME` 根目录)一律不记录。
-  典型噪声:Opentodo 自动 check-in 产生的 "Quick check-in"/"Greeting" 会话(跑在 `/var/folders`、`/tmp`)。
-  插件在会话首次出现时用 `ctx.session.get()` 判定 `parentID`/`location.directory`,命中即发
-  `session.ignore` 让桥接层删除已写状态;App 读取时也按目录过滤,并在清理时删除
+- **不再把「临时位置」的 opencode 会话当成灯**:目录为 `/tmp`、`/private/tmp`、`/var/folders`、
+  `/private/var/folders`,或正好是 `$HOME` 根目录的会话不予记录。典型噪声:Opentodo 自动 check-in 产生的
+  "Quick check-in"/"Greeting"(跑在 `/var/folders`、`/tmp`)。插件在会话首次出现时用 `ctx.session.get()`
+  取 `location.directory`,命中即发 `session.ignore` 让桥接层删除已写状态;App 读取时也按目录过滤并在清理时删除
+  - **子会话(`parentID` 非空)照常跟踪**:后台子代理、或正在等权限/提问的 subagent 往往才是需要你关注的那个
 
 ### Changed
 - **opencode v2:同一事件不再重复转发**:opencode 按 location 加载插件,同一进程内会有多份实例订阅**全局**事件流,
