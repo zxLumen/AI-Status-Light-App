@@ -190,11 +190,11 @@ function pick(value, ...keys) {
   return undefined;
 }
 
-export const AistatusPlugin = async () => {
-  log(`plugin loaded host=${HOST} ref=${HOST_REF ?? "null"}`);
-  return {
-    // Busy while a tool runs (these are hooks, not events).
-    "tool.execute.before": async (input) => {
+// ---------------------------------------------------------------------------
+// Hook bodies (original V1 logic, unchanged). Driven by the V2 entrypoint at
+// the bottom of this file.
+// ---------------------------------------------------------------------------
+async function onToolBefore(input) {
       const sid = input?.sessionID;
       if (!sid) return;
       inflight.set(sid, (inflight.get(sid) ?? 0) + 1);
@@ -206,9 +206,10 @@ export const AistatusPlugin = async () => {
       }
       if (pendingQuestion.has(sid) || pendingPermission.has(sid)) return;
       log(`tool.before sid=${sid} tool=${input?.tool}`);
-      forward("tool.before", { sessionID: sid, tool: input?.tool });
-    },
-    "tool.execute.after": async (input) => {
+  forward("tool.before", { sessionID: sid, tool: input?.tool });
+}
+
+async function onToolAfter(input) {
       const sid = input?.sessionID;
       if (!sid) return;
       inflight.set(sid, Math.max(0, (inflight.get(sid) ?? 1) - 1));
@@ -219,9 +220,10 @@ export const AistatusPlugin = async () => {
         return;
       }
       if (pendingQuestion.has(sid) || pendingPermission.has(sid)) return;
-      forward("tool.after", { sessionID: sid, tool: input?.tool });
-    },
-    event: async ({ event }) => {
+  forward("tool.after", { sessionID: sid, tool: input?.tool });
+}
+
+async function handleEvent(event) {
       const type = event?.type;
       if (!type || !ALLOWED.includes(type)) return;
       const props = event?.properties ?? event?.data ?? {};
@@ -242,44 +244,37 @@ export const AistatusPlugin = async () => {
         cancelReinforce(sessionID);
       }
 
-      // The `question` tool blocks on the user choosing an option — surface it as
-      // blocked (opencode keeps session.status busy, so it needs special handling).
-      if (type === "message.part.updated") {
-        const part = props.part ?? {};
-        // Model reasoning → thinking (once per part).
-        if (part.type === "reasoning") {
-          const rid = part.id ?? sessionID;
-          if (lastThinking.get(rid) !== "done") {
-            lastThinking.set(rid, "done");
-            if (!pendingQuestion.has(sessionID)) {
-              log(`thinking sid=${sessionID}`);
-              forward("thinking", { sessionID });
-            }
-          }
-          return;
+      // Reasoning → thinking (once per session turn).
+      if (type === "thinking") {
+        if (!pendingQuestion.has(sessionID)) {
+          log(`thinking sid=${sessionID}`);
+          forward("thinking", { sessionID });
         }
-        if (part.type === "tool" && part.tool === QUESTION_TOOL) {
-          const status = part.state?.status;
-          const qid = part.id ?? sessionID;
-          if (status === "running") {
-            pendingQuestion.add(sessionID);
-            if (lastQuestion.get(qid) !== "running") {
-              lastQuestion.set(qid, "running");
-              const text = part.state?.input?.questions?.[0]?.question ?? null;
-              log(`question.asked sid=${sessionID} ${JSON.stringify(text)}`);
-              const props2 = { sessionID, message: text, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status: "running" } } };
-              forward("question.asked", props2);
-              reinforce("question.asked", props2, sessionID);
-            }
-          } else if (status === "completed" || status === "error") {
-            pendingQuestion.delete(sessionID);
-            cancelReinforce(sessionID);
-            if (lastQuestion.get(qid) !== "done") {
-              lastQuestion.set(qid, "done");
-              log(`question.replied sid=${sessionID} status=${status}`);
-              forward("question.replied", { sessionID, part: { id: qid, type: "tool", tool: QUESTION_TOOL, state: { status } } });
-            }
-          }
+        return;
+      }
+
+      // The agent is waiting on the user. In opencode v2 the `question` tool is
+      // surfaced as a form; treat form.created/replied as question.asked/replied.
+      if (type === "question.asked") {
+        pendingQuestion.add(sessionID);
+        const qid = props.part?.id ?? sessionID;
+        if (lastQuestion.get(qid) !== "running") {
+          lastQuestion.set(qid, "running");
+          log(`question.asked sid=${sessionID} ${JSON.stringify(props.message ?? null)}`);
+          const props2 = { sessionID, message: props.message ?? null, part: props.part };
+          forward("question.asked", props2);
+          reinforce("question.asked", props2, sessionID);
+        }
+        return;
+      }
+      if (type === "question.replied") {
+        const qid = props.part?.id ?? sessionID;
+        pendingQuestion.delete(sessionID);
+        cancelReinforce(sessionID);
+        if (lastQuestion.get(qid) !== "done") {
+          lastQuestion.set(qid, "done");
+          log(`question.replied sid=${sessionID}`);
+          forward("question.replied", { sessionID });
         }
         return;
       }
@@ -307,6 +302,108 @@ export const AistatusPlugin = async () => {
       if (dir) lastDir.set(sessionID, dir);
       log(`${type} sid=${sessionID} title=${JSON.stringify(title ?? null)} dir=${JSON.stringify(dir ?? null)} status=${JSON.stringify(pick(props, "status"))}`);
       forward(type, { ...props, sessionID, session_name: title, session_dir: dir });
-    },
-  };
+}
+
+// ---------------------------------------------------------------------------
+// V2 bridge: translate opencode v2 events (`event.data`) into the V1-shaped
+// `{ type, properties }` objects the state machine above already understands.
+// Semantic mapping to the store lives in the Python side (store.opencode_state).
+// ---------------------------------------------------------------------------
+function fromV2(ev) {
+  const type = ev?.type;
+  const d = ev?.data ?? ev?.properties ?? {};
+  switch (type) {
+    case "session.status":
+      return { type: "session.status", properties: { sessionID: d.sessionID, status: d.status } };
+    case "session.idle":
+      return { type: "session.idle", properties: { sessionID: d.sessionID } };
+    // opencode v2 no longer emits session.status/session.idle; a turn's
+    // boundaries are signalled by session.execution.* (started = busy).
+    case "session.execution.started":
+      return { type: "session.status", properties: { sessionID: d.sessionID, status: { type: "busy" } } };
+    case "session.execution.succeeded":
+      return { type: "session.idle", properties: { sessionID: d.sessionID } };
+    case "session.execution.failed":
+      return { type: "session.error", properties: { sessionID: d.sessionID, error: d.error } };
+    case "session.created":
+      return { type: "session.created", properties: {
+        sessionID: d.sessionID ?? ev?.durable?.aggregateID ?? null,
+        info: { title: d.title, directory: d.location?.directory },
+      } };
+    case "session.renamed":
+      return { type: "session.updated", properties: { sessionID: d.sessionID, info: { title: d.title } } };
+    case "permission.asked":
+      return { type: "permission.asked", properties: {
+        sessionID: d.sessionID, id: d.id, action: d.action, resources: d.resources,
+        metadata: d.metadata, source: d.source, message: d.message,
+      } };
+    case "permission.replied":
+      return { type: "permission.replied", properties: { sessionID: d.sessionID, requestID: d.requestID, reply: d.reply } };
+    case "session.reasoning.started":
+      return { type: "thinking", properties: { sessionID: d.sessionID } };
+    case "form.created": {
+      const f = d.form ?? {};
+      const questions = Array.isArray(f.fields)
+        ? f.fields.map((field) => ({ question: field?.label ?? field?.placeholder ?? "" }))
+        : [];
+      return { type: "question.asked", properties: {
+        sessionID: f.sessionID ?? f.sessionId ?? d.sessionID ?? null,
+        message: questions[0]?.question ?? null,
+        part: { id: f.id ?? d.id ?? null, type: "tool", tool: QUESTION_TOOL, state: { status: "running" } },
+      } };
+    }
+    case "form.replied":
+    case "form.cancelled":
+      return { type: "question.replied", properties: { sessionID: d.sessionID } };
+    default:
+      return null;
+  }
+}
+
+// V2 invokes setup twice per process (server boot + first app load), often
+// concurrently. Claim a process-global slot synchronously (no await before the
+// claim) so exactly one registration/hook set is ever created.
+const GUARD_KEY = "__aistatusActiveSubscription";
+
+export default {
+  id: "aistatus",
+  async setup(ctx) {
+    if (globalThis[GUARD_KEY]) {
+      log("setup called again; already active, skipping duplicate");
+      return () => {};
+    }
+    globalThis[GUARD_KEY] = true;
+    log(`plugin loaded host=${HOST} ref=${HOST_REF ?? "null"}`);
+    // Tool hooks replace the V1 "tool.execute.before/after" hooks.
+    try {
+      await ctx.tool.hook("execute.before", async (event) => {
+        await onToolBefore({ sessionID: event?.sessionID, tool: event?.tool });
+      });
+      await ctx.tool.hook("execute.after", async (event) => {
+        await onToolAfter({ sessionID: event?.sessionID, tool: event?.tool });
+      });
+    } catch (e) {
+      log(`hook registration failed: ${e?.message ?? e}`);
+    }
+    // Event subscription replaces the V1 `event` hook.
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
+          const mapped = fromV2(ev);
+          if (mapped) handleEvent(mapped);
+        }
+      } catch (e) {
+        if (!controller.signal.aborted) log(`event stream error: ${e?.message ?? e}`);
+      }
+    })();
+    return () => {
+      globalThis[GUARD_KEY] = false;
+      try { controller.abort(); } catch (e) {}
+      for (const id of heartbeats.values()) { try { clearInterval(id); } catch (e) {} }
+      heartbeats.clear();
+      for (const t of reinforceTimers.values()) { try { clearTimeout(t); } catch (e) {} }
+      reinforceTimers.clear();
+    };
+  },
 };

@@ -28,21 +28,21 @@ CURSOR_HOOK_EVENTS = [
     "stop",
 ]
 
-# Events the opencode plugin forwards to the store (kept in sync with the
-# event hook in opencode_plugin.js). Semantic mapping lives in
-# opencode_state(). Names follow opencode 1.18 (v1); "permission.asked" is
-# kept for forward-compat with v2.
+# Internal event types the opencode v2 plugin forwards to the store (kept in
+# sync with fromV2()/ALLOWED in opencode_plugin.js). The plugin translates
+# native opencode v2 events into these names, so the semantic mapping in
+# store.opencode_state() is unchanged.
 OPENCODE_EVENTS = [
     "session.created",
     "session.updated",
     "session.status",
     "session.idle",
     "session.error",
-    "permission.updated",
     "permission.asked",
     "permission.replied",
-    "tool.execute.before",
-    "message.part.updated",
+    "question.asked",
+    "question.replied",
+    "thinking",
 ]
 
 ACTIVE_STATES = ("working", "busy", "thinking")
