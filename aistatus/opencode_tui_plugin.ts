@@ -50,9 +50,9 @@ function safeStringify(value) {
   }
 }
 
-// A session is "remote" when its directory is outside the local home prefix.
-// (A local macOS session is always under e.g. /Users/<user>/…)
-function isRemoteDir(dir) {
+// A path is "remote" when it is outside the local home prefix. (A local macOS
+// session is always under e.g. /Users/<user>/…)
+function isRemotePath(dir) {
   return typeof dir === "string" && dir.length > 0 && !dir.startsWith(LOCAL_PREFIX)
 }
 
@@ -95,13 +95,56 @@ function forward(eventType, data, name, dir, created) {
   try { child.stdin.end(payload) } catch (e) { err += String(e); finish("stdin-error") }
 }
 
+// V2 can call setup twice for one loaded instance (startup + first app load);
+// keep a module-scoped claim so exactly one listener is registered. A fresh
+// module evaluation (opencode reloads when the file changes) starts clean.
+let active = false
+
+// The TUI event bus can deliver the same event more than once, and this plugin
+// is instantiated more than once per process — so the claim map is shared on
+// globalThis, not per module instance.
+const seen = (globalThis.__aistatusTuiSeen ??= new Map())
+const SEEN_TTL_MS = 60000
+function firstSeen(id) {
+  if (!id) return true
+  const now = Date.now()
+  if (seen.size > 512) { for (const [k, t] of seen) { if (now - t > SEEN_TTL_MS) seen.delete(k) } }
+  if (seen.has(id)) return false
+  seen.set(id, now)
+  return true
+}
+
 // Only the state-changing V2 events (the high-frequency deltas are ignored).
 const HANDLED = /^(session\.(execution\.(started|succeeded|failed|interrupted)|reasoning\.started|error|created|updated|renamed|tool\.(called|success|failed))|permission\.(asked|replied)|form\.(created|replied|cancelled))$/
 
 export default Plugin.define({
   id: "aistatus.tui",
   setup(context) {
-    log("tui plugin loaded loc=" + JSON.stringify(context?.location?.directory ?? null))
+    if (active) {
+      log("tui setup called again; already active, skipping")
+      return () => {}
+    }
+    active = true
+    const clientLoc = context?.location?.directory ?? null
+    log("tui plugin loaded loc=" + JSON.stringify(clientLoc))
+    // Whether THIS terminal client talks to a remote server. It is fixed per
+    // client — unlike an event's `location`, which the `session.execution.*`
+    // events do not carry (using the event's location there silently dropped
+    // every success/failure, so the light stuck on "thinking").
+    const isRemoteClient = isRemotePath(clientLoc)
+    const dirCache = new Map()
+    const dirOf = (sid) => {
+      if (dirCache.has(sid)) return dirCache.get(sid)
+      let d = null
+      try { d = context?.data?.session?.get?.(sid)?.location?.directory ?? null } catch (e) {}
+      if (d) dirCache.set(sid, d)
+      return d
+    }
+    const nameOf = (sid) => {
+      try { const s = context?.data?.session?.get?.(sid); if (s?.title) return s.title } catch (e) {}
+      try { for (const t of context?.ui?.tabs?.list?.() ?? []) if (t?.sessionID === sid) return t.title } catch (e) {}
+      return null
+    }
     const openIds = () => {
       const ids = new Set()
       try { for (const t of context?.ui?.tabs?.list?.() ?? []) if (t?.sessionID) ids.add(t.sessionID) } catch (e) {}
@@ -111,21 +154,19 @@ export default Plugin.define({
       } catch (e) {}
       return ids
     }
-    const titleOf = (sid) => {
-      try { for (const t of context?.ui?.tabs?.list?.() ?? []) if (t?.sessionID === sid) return t.title } catch (e) {}
-      return null
-    }
     const stop = context.data.listen((arg) => {
       const d = arg?.details ?? arg
       const type = d?.type
       if (!type || !HANDLED.test(type)) return
-      const dir = d?.location?.directory
-      if (!isRemoteDir(dir)) return              // local sessions → server plugin
+      if (!firstSeen(d?.id)) return               // the bus can repeat an event
+      if (!isRemoteClient) return                 // local sessions → server plugin
       const data = d?.data ?? {}
       const sid = data?.sessionID ?? data?.form?.sessionID ?? d?.durable?.aggregateID
       if (!sid) return
-      if (!openIds().has(sid)) return            // only sessions open in THIS client
-      forward(type, data, titleOf(sid), dir, d?.created)
+      if (!openIds().has(sid)) return             // only sessions open in THIS client
+      const envDir = d?.location?.directory
+      if (typeof envDir === "string" && envDir) dirCache.set(sid, envDir)
+      forward(type, data, nameOf(sid), envDir ?? dirOf(sid), d?.created)
     })
     return () => { try { stop() } catch (e) {} }
   },

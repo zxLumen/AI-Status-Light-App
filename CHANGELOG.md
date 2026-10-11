@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **opencode v2:远端会话卡在 thinking / 收不到 success**:TUI 插件原先用「事件里的 `location.directory`」判断
+  是否远端,但 `session.execution.started/succeeded/failed/interrupted` **不带 location** → 被过滤掉,远端会话
+  永远走不到 success/error。现改为用**客户端自身**的 `context.location.directory` 判断(每客户端固定),
+  会话目录/标题优先取 `context.data.session.get()`,事件里有 location 再用事件的
+- `cli.json` 不再开启 opencode 内置 `attention`:它播的是**内置默认音**,会盖过你自制的语音;
+  本地会话的定制语音由 `smart-voice-notify`(Voice-Diy 语料)负责
+
 ### Added
 - **opencode v2:TUI(客户端)插件 —— 捕捉「本机正在用的远端服务器会话」**
   - 服务器插件跑在服务端,远端服务器的会话本地灯看不到;新增 TUI 插件跑在本地终端客户端,能拿到
