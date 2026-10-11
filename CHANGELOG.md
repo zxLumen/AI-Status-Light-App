@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Added
+- **远端会话也能听到你自制的语音**:TUI 插件对「远端 + 本终端打开」的会话,按事件类别从
+  Voice-Diy 语料(`~/.config/opencode/voice-cache-index/corpus.json` + `voice-cache/`)随机取一条,
+  用 `afplay -v 1.6` 播放(`session.execution.succeeded`→idle、`permission.asked`→permission、
+  `form.created`→question、`session.error`/`execution.failed`→error)。本地会话仍由
+  smart-voice-notify 负责,两者互不重复(靠“仅远端客户端”分流)
+- TUI 插件的事件去重改为**跨进程**文件占位(`~/.ai-status-light/oc-seen/`):同一会话在多个终端打开时,
+  灯和声音都只处理一次;另修正 TUI 插件缺少 `node:os` 导入
+
 ### Fixed
 - **opencode v2:远端会话卡在 thinking / 收不到 success**:TUI 插件原先用「事件里的 `location.directory`」判断
   是否远端,但 `session.execution.started/succeeded/failed/interrupted` **不带 location** → 被过滤掉,远端会话

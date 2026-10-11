@@ -173,6 +173,12 @@ aistatus install-hooks --agent all
 >
 > 提示音走 opencode 内置 attention:在 `~/.config/opencode/cli.json` 打开
 > `attention.sound` / `attention.notifications`(done/question/permission/error/subagent_done)。
+>
+> **远端会话的语音**:TUI 插件会在「远端 + 本终端打开」的会话状态变化时,直接 `afplay` 播放你
+> Voice-Diy 语料中的一条(`~/.config/opencode/voice-cache-index/corpus.json` 随机取);
+> 音量安装时由 `AISTATUS_VOICE_VOLUME`(默认 `1.6`)决定。本地会话仍由 smart-voice-notify 负责。
+> 同一事件在多个终端打开时只处理一次(`~/.ai-status-light/oc-seen/` 跨进程去重)。
+
 
 
 ## 灯效映射

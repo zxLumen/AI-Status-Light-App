@@ -232,6 +232,7 @@ def _subst_template(text):
             .replace("__AI_STATUS_HOME__", json.dumps(store.home_dir()))
             .replace("__EVENTS__", json.dumps(OPENCODE_EVENTS))
             .replace("__REMOTE_LABEL__", json.dumps(os.environ.get("AISTATUS_REMOTE_LABEL", "remote")))
+            .replace("__VOICE_VOLUME__", os.environ.get("AISTATUS_VOICE_VOLUME", "1.6"))
             .replace("__LOCAL_HOME__", json.dumps(os.path.expanduser("~"))))
 
 

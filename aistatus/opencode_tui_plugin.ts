@@ -10,6 +10,7 @@
 import { Plugin } from "@opencode/plugin/tui"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 const PY = __PY__
@@ -100,18 +101,85 @@ function forward(eventType, data, name, dir, created) {
 // module evaluation (opencode reloads when the file changes) starts clean.
 let active = false
 
-// The TUI event bus can deliver the same event more than once, and this plugin
-// is instantiated more than once per process — so the claim map is shared on
-// globalThis, not per module instance.
-const seen = (globalThis.__aistatusTuiSeen ??= new Map())
-const SEEN_TTL_MS = 60000
+// The TUI event bus can deliver the same event more than once, AND the same
+// session is often open in several terminals (each its own process) — so the
+// claim must be shared across processes. A per-event marker file gives atomic
+// cross-process "first wins" (the others skip forwarding AND playback).
+const CLAIM_DIR = path.join(AI_STATUS_HOME, "oc-seen")
+let claimCount = 0
+function pruneClaims() {
+  try {
+    const now = Date.now()
+    for (const f of fs.readdirSync(CLAIM_DIR)) {
+      const p = path.join(CLAIM_DIR, f)
+      try { if (now - fs.statSync(p).mtimeMs > 300000) fs.unlinkSync(p) } catch (e) {}
+    }
+  } catch (e) {}
+}
 function firstSeen(id) {
   if (!id) return true
-  const now = Date.now()
-  if (seen.size > 512) { for (const [k, t] of seen) { if (now - t > SEEN_TTL_MS) seen.delete(k) } }
-  if (seen.has(id)) return false
-  seen.set(id, now)
-  return true
+  const safe = String(id).replace(/[^A-Za-z0-9_.-]/g, "_")
+  try {
+    fs.mkdirSync(CLAIM_DIR, { recursive: true })
+    fs.writeFileSync(path.join(CLAIM_DIR, safe), "", { flag: "wx" })
+    if (++claimCount % 200 === 0) pruneClaims()
+    return true
+  } catch (e) {
+    if (e && e.code === "EEXIST") return false   // another process already did
+    return true                                  // on any other error, don't block
+  }
+}
+
+// Local, custom voice for REMOTE sessions. The server-side voice plugin
+// (smart-voice-notify) only runs where it is installed, so a remote server's
+// sessions never reach it. This client plays the same self-made corpus
+// (Opencode-Voice-Diy) directly with afplay, for sessions open in this terminal.
+const VOICE_VOLUME = __VOICE_VOLUME__
+const VOICE_GROUP = {
+  "session.execution.succeeded": "idleTTSMessages",
+  "permission.asked": "permissionTTSMessages",
+  "form.created": "questionTTSMessages",
+  "session.error": "errorTTSMessages",
+  "session.execution.failed": "errorTTSMessages",
+}
+
+function loadVoiceIndex() {
+  const cfg = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "opencode")
+  const cacheDir = path.join(cfg, "voice-cache")
+  const indexes = [
+    path.join(cfg, "voice-cache-index", "corpus.json"),
+    path.join(cfg, "opencode_voice", "voice-cache-index", "corpus.json"),
+  ]
+  for (const idx of indexes) {
+    try {
+      const entries = JSON.parse(fs.readFileSync(idx, "utf8"))
+      const byGroup = new Map()
+      for (const e of entries) {
+        const file = e?.file
+        if (!e?.group || !file) continue
+        const full = path.join(cacheDir, file)
+        try { if (!fs.existsSync(full)) continue } catch (err) { continue }
+        if (!byGroup.has(e.group)) byGroup.set(e.group, [])
+        byGroup.get(e.group).push(full)
+      }
+      if (byGroup.size) { log(`voice index loaded: ${idx} (${byGroup.size} groups)`); return byGroup }
+    } catch (e) {}
+  }
+  log("voice index not found; remote voice disabled")
+  return new Map()
+}
+
+function playVoice(voices, group) {
+  if (!group) return
+  const files = voices.get(group)
+  if (!files || !files.length) return
+  const file = files[Math.floor(Math.random() * files.length)]
+  try {
+    const p = spawn("afplay", ["-v", String(VOICE_VOLUME), file], { stdio: "ignore", detached: true })
+    p.on("error", (e) => log("afplay error: " + e))
+    if (p.unref) p.unref()
+    log("voice " + group + " " + path.basename(file))
+  } catch (e) { log("afplay threw: " + e) }
 }
 
 // Only the state-changing V2 events (the high-frequency deltas are ignored).
@@ -132,6 +200,11 @@ export default Plugin.define({
     // events do not carry (using the event's location there silently dropped
     // every success/failure, so the light stuck on "thinking").
     const isRemoteClient = isRemotePath(clientLoc)
+    let voice = new Map()
+    if (isRemoteClient) {
+      try { voice = loadVoiceIndex() } catch (e) { log("voice load threw: " + (e && e.stack ? e.stack : e)) }
+    }
+    log(`setup isRemote=${isRemoteClient} loc=${JSON.stringify(clientLoc)} voiceGroups=${voice.size}`)
     const dirCache = new Map()
     const dirOf = (sid) => {
       if (dirCache.has(sid)) return dirCache.get(sid)
@@ -158,14 +231,15 @@ export default Plugin.define({
       const d = arg?.details ?? arg
       const type = d?.type
       if (!type || !HANDLED.test(type)) return
-      if (!firstSeen(d?.id)) return               // the bus can repeat an event
       if (!isRemoteClient) return                 // local sessions → server plugin
+      if (!firstSeen(d?.id)) return               // once across all terminals
       const data = d?.data ?? {}
       const sid = data?.sessionID ?? data?.form?.sessionID ?? d?.durable?.aggregateID
       if (!sid) return
       if (!openIds().has(sid)) return             // only sessions open in THIS client
       const envDir = d?.location?.directory
       if (typeof envDir === "string" && envDir) dirCache.set(sid, envDir)
+      if (!isBlocked(sid)) playVoice(voice, VOICE_GROUP[type])
       forward(type, data, nameOf(sid), envDir ?? dirOf(sid), d?.created)
     })
     return () => { try { stop() } catch (e) {} }
