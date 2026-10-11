@@ -33,6 +33,43 @@ const pendingQuestion = new Set(); // sessions currently blocked on a question
 const pendingPermission = new Set(); // sessions waiting on a permission prompt
 const inflight = new Map();        // sessionID -> running tool count
 const heartbeats = new Map();      // sessionID -> interval id
+const metaFetched = new Set();     // sessionID -> already fetched name/dir via ctx.session.get
+const busyAt = new Map();          // sessionID -> last "busy" forward (dedupe hook vs event)
+const workAt = new Map();          // sessionID -> last "working" forward
+
+// opencode v2 emits both a tool hook (execute.before/after) and a public
+// `session.tool.called/success` event for the same call. Only the first source
+// within a short window is forwarded, so the state doesn't double-fire.
+const BUSY_DEDUPE_MS = 800;
+function dedupeGate(map, sid) {
+  const now = Date.now();
+  const t = map.get(sid) ?? 0;
+  if (now - t < BUSY_DEDUPE_MS) return true;
+  map.set(sid, now);
+  return false;
+}
+
+// opencode v2 makes the title hard to observe: only `session.created` and
+// `session.renamed` carry it, so a session that already existed when the plugin
+// loaded never gets a name (the light falls back to the agent label). Fetch it
+// once per session straight from the session object, where it lives.
+async function ensureMeta(ctx, sessionID, title, dir) {
+  if (!sessionID || title) return;                      // event already had a title
+  if (lastTitle.has(sessionID) || metaFetched.has(sessionID)) return;
+  metaFetched.add(sessionID);
+  try {
+    const res = await ctx.session.get({ sessionID });
+    const info = res?.data ?? res ?? {};
+    const t = info.title ?? null;
+    const d = info.location?.directory ?? info.directory ?? dir ?? null;
+    if (!t && !d) return;
+    if (t) lastTitle.set(sessionID, t);
+    log(`meta ${sessionID} title=${JSON.stringify(t)} dir=${JSON.stringify(d)}`);
+    forward("session.updated", { sessionID, session_name: t, session_dir: d });
+  } catch (e) {
+    log(`session.get failed ${sessionID}: ${e?.message ?? e}`);
+  }
+}
 
 const HEARTBEAT_MS = 180000;       // refresh while a tool runs (3 min)
 
@@ -197,6 +234,7 @@ function pick(value, ...keys) {
 async function onToolBefore(input) {
       const sid = input?.sessionID;
       if (!sid) return;
+      if (dedupeGate(busyAt, sid)) return;   // hook + event may both fire; keep one
       inflight.set(sid, (inflight.get(sid) ?? 0) + 1);
       startHeartbeat(sid);
       // The question tool means "waiting for the user" → blocked, not busy.
@@ -220,6 +258,7 @@ async function onToolAfter(input) {
         return;
       }
       if (pendingQuestion.has(sid) || pendingPermission.has(sid)) return;
+      if (dedupeGate(workAt, sid)) return;   // hook + event may both fire; keep one
   forward("tool.after", { sessionID: sid, tool: input?.tool });
 }
 
@@ -328,10 +367,19 @@ function fromV2(ev) {
     case "session.created":
       return { type: "session.created", properties: {
         sessionID: d.sessionID ?? ev?.durable?.aggregateID ?? null,
-        info: { title: d.title, directory: d.location?.directory },
+        info: { title: d.info?.title ?? d.title,
+                directory: d.info?.directory ?? d.location?.directory },
       } };
     case "session.renamed":
-      return { type: "session.updated", properties: { sessionID: d.sessionID, info: { title: d.title } } };
+      return { type: "session.updated", properties: { sessionID: d.sessionID,
+        info: { title: d.info?.title ?? d.title,
+                directory: d.info?.directory ?? d.directory } } };
+    // The session object (title/directory) also arrives nested under `data.info`;
+    // read it so a renamed or updated session always surfaces its name.
+    case "session.updated":
+      return { type: "session.updated", properties: { sessionID: d.sessionID,
+        info: { title: d.info?.title ?? d.title,
+                directory: d.info?.directory ?? d.directory } } };
     case "permission.asked":
       return { type: "permission.asked", properties: {
         sessionID: d.sessionID, id: d.id, action: d.action, resources: d.resources,
@@ -360,19 +408,23 @@ function fromV2(ev) {
   }
 }
 
-// V2 invokes setup twice per process (server boot + first app load), often
-// concurrently. Claim a process-global slot synchronously (no await before the
-// claim) so exactly one registration/hook set is ever created.
-const GUARD_KEY = "__aistatusActiveSubscription";
+// V2 can invoke setup twice for one loaded instance (server boot + first app
+// load), often concurrently. Claim a MODULE-scoped slot synchronously (no await
+// before the claim) so one instance registers only once. Crucially this is NOT
+// on globalThis: opencode hot-reloads a plugin when its file changes by
+// re-importing the module, so a fresh evaluation must register again. A
+// globalThis flag would make the reloaded instance skip registration while the
+// old registrations are already disposed — silently killing the tool hooks.
+let active = false;
 
 export default {
   id: "aistatus",
   async setup(ctx) {
-    if (globalThis[GUARD_KEY]) {
+    if (active) {
       log("setup called again; already active, skipping duplicate");
       return () => {};
     }
-    globalThis[GUARD_KEY] = true;
+    active = true;
     log(`plugin loaded host=${HOST} ref=${HOST_REF ?? "null"}`);
     // Tool hooks replace the V1 "tool.execute.before/after" hooks.
     try {
@@ -390,15 +442,34 @@ export default {
     void (async () => {
       try {
         for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
+          const raw = ev?.type;
+          const d = ev?.data ?? {};
+          // Tool activity is visible as a public event too; forward it directly
+          // (it is not part of the ALLOWED set handled below).
+          if (raw === "session.tool.called") {
+            await onToolBefore({ sessionID: d.sessionID, tool: d.tool ?? d.name });
+            continue;
+          }
+          if (raw === "session.tool.success" || raw === "session.tool.failed") {
+            await onToolAfter({ sessionID: d.sessionID, tool: d.tool ?? d.name });
+            continue;
+          }
           const mapped = fromV2(ev);
-          if (mapped) handleEvent(mapped);
+          if (!mapped) continue;
+          // The envelope carries `location.directory` on every event, so the
+          // directory is also available one level up from `data`.
+          const envDir = ev?.location?.directory;
+          if (envDir && !mapped.properties.session_dir) mapped.properties.session_dir = envDir;
+          void ensureMeta(ctx, mapped.properties.sessionID,
+                          mapped.properties.info?.title ?? mapped.properties.session_name, envDir);
+          handleEvent(mapped);
         }
       } catch (e) {
         if (!controller.signal.aborted) log(`event stream error: ${e?.message ?? e}`);
       }
     })();
     return () => {
-      globalThis[GUARD_KEY] = false;
+      active = false;
       try { controller.abort(); } catch (e) {}
       for (const id of heartbeats.values()) { try { clearInterval(id); } catch (e) {} }
       heartbeats.clear();

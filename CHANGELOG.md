@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- **opencode v2:菜单/状态灯里会话名全是「opencode」**:v2 只有 `session.created`/`session.renamed`
+  会带标题,插件加载前已存在的会话永远拿不到名字,于是回退成 agent 名。现改为:任一会话第一次出现时,
+  用 `ctx.session.get()` **一次性取回标题与目录**(名字实际藏在会话对象里),通过 `session.updated` 写入
+  `names.json`;并统一从事件信封的 `location.directory` 取目录
+- **opencode v2:工具运行中的「busy」状态丢失**:插件用 `globalThis` 做「只注册一次」去重,而 opencode
+  在插件文件变化时会**重新 import 模块**;`globalThis` 标志仍在,新实例的 `setup()` 直接跳过注册,
+  旧实例的 hook 已回收 → `tool.execute.before/after` 永久失效。改用**模块作用域**标志(同一实例内仍去重,
+  热重载后必然重新注册)
+- opencode v2 另有公开的 `session.tool.called/success/failed` 事件;现也直接映射为 busy/working,
+  与 hook 通道在 800ms 内去重,作为 hook 缺失(按项目/location 作用域)时的兜底
+
 ### Added
 - README 增加**完整演示 GIF**(`docs/images/demo-full.gif`,640×416、10fps、4× 加速、约 4.8MB),
   走查:VS Code/opencode 跑任务 → 菜单栏灯与悬浮红绿灯 → 会话列表/会话管理/悬浮灯/手机推送
