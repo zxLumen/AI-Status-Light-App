@@ -2,6 +2,7 @@
 // Re-run: aistatus install-hooks --agent opencode
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const PY = __PY__;
@@ -41,9 +42,23 @@ const pendingPermission = (G.__aistatusPendingPermission ??= new Set()); // sess
 const inflight = (G.__aistatusInflight ??= new Map());        // sessionID -> running tool count
 const heartbeats = (G.__aistatusHeartbeats ??= new Map());    // sessionID -> interval id
 const metaFetched = (G.__aistatusMetaFetched ??= new Set());  // sessionID -> fetched name/dir via ctx.session.get
+const parentOf = (G.__aistatusParentOf ??= new Map());        // sessionID -> parentID (null = top-level)
 const busyAt = (G.__aistatusBusyAt ??= new Map());            // sessionID -> last "busy" forward (dedupe hook vs event)
 const workAt = (G.__aistatusWorkAt ??= new Map());            // sessionID -> last "working" forward
 const seenEvents = (G.__aistatusSeenEvents ??= new Map());    // event id -> first-seen ts
+const ignored = (G.__aistatusIgnored ??= new Set());          // sessionIDs never tracked
+
+// Sessions that must never show up as a light: opencode sub-sessions (handled
+// via parentID in ensureMeta) and sessions opened in a temporary/system
+// location. The Opentodo app's automatic "check-in" runs live in /var/folders
+// (or /tmp, or $HOME itself); real work happens in a project subdirectory.
+const HOME_DIR = os.homedir();
+function ignoredDir(d) {
+  if (!d) return false;
+  if (d === HOME_DIR) return true;
+  return d.startsWith("/tmp/") || d.startsWith("/private/tmp/")
+      || d.startsWith("/var/folders/") || d.startsWith("/private/var/folders/");
+}
 
 // Claim an event id so only one plugin instance in the process acts on it.
 const SEEN_TTL_MS = 60000;
@@ -76,15 +91,23 @@ function dedupeGate(map, sid) {
 // loaded never gets a name (the light falls back to the agent label). Fetch it
 // once per session straight from the session object, where it lives.
 async function ensureMeta(ctx, sessionID, title, dir) {
-  if (!sessionID || title) return;                      // event already had a title
-  if (lastTitle.has(sessionID) || metaFetched.has(sessionID)) return;
+  if (!sessionID) return;
+  if (metaFetched.has(sessionID)) return;
   metaFetched.add(sessionID);
   try {
     const res = await ctx.session.get({ sessionID });
     const info = res?.data ?? res ?? {};
-    const t = info.title ?? null;
+    const t = info.title ?? title ?? null;
     const d = info.location?.directory ?? info.directory ?? dir ?? null;
-    if (!t && !d) return;
+    const p = info.parentID ?? info.parent_id ?? null;
+    parentOf.set(sessionID, p ?? null);
+    // Never track a sub-session, nor a session opened in a temp / home location.
+    if (p || ignoredDir(d)) {
+      ignored.add(sessionID);
+      log(`meta ${sessionID} parent=${p ?? "null"} dir=${JSON.stringify(d)} -> ignored`);
+      forward("session.ignore", { sessionID });
+      return;
+    }
     if (t) lastTitle.set(sessionID, t);
     log(`meta ${sessionID} title=${JSON.stringify(t)} dir=${JSON.stringify(d)}`);
     forward("session.updated", { sessionID, session_name: t, session_dir: d });
@@ -475,18 +498,30 @@ export default {
           const mapped = isToolEvent ? null : fromV2(ev);
           if (!isToolEvent && !mapped) continue;    // ignore the high-frequency deltas
           if (!firstSeen(ev?.id)) continue;         // one instance acts per event
+          const sid = isToolEvent ? d.sessionID : mapped.properties.sessionID;
+          if (!sid) continue;
+          const envDir = ev?.location?.directory;
+          if (!ignored.has(sid) && ignoredDir(envDir)) {   // obvious temp/home location
+            ignored.add(sid);
+            forward("session.ignore", { sessionID: sid });
+          }
+          if (ignored.has(sid)) continue;
           if (isToolEvent) {
-            const input = { sessionID: d.sessionID, tool: d.tool ?? d.name };
+            await ensureMeta(ctx, sid, null, envDir);      // resolves parentID / dir once
+            if (ignored.has(sid)) continue;
+            const input = { sessionID: sid, tool: d.tool ?? d.name };
             if (raw === "session.tool.called") await onToolBefore(input);
             else await onToolAfter(input);
             continue;
           }
+          // Resolve the session first (sub-session / temp dir filtering + name),
+          // so an event can never create a state file for a session we drop.
+          await ensureMeta(ctx, sid,
+                           mapped.properties.info?.title ?? mapped.properties.session_name, envDir);
+          if (ignored.has(sid)) continue;
           // The envelope carries `location.directory` on every event, so the
           // directory is also available one level up from `data`.
-          const envDir = ev?.location?.directory;
           if (envDir && !mapped.properties.session_dir) mapped.properties.session_dir = envDir;
-          void ensureMeta(ctx, mapped.properties.sessionID,
-                          mapped.properties.info?.title ?? mapped.properties.session_name, envDir);
           handleEvent(mapped);
         }
       } catch (e) {

@@ -85,6 +85,7 @@ enum StateStore {
             if muted[rec.sessionId] != nil { continue }     // blocked: never monitored
             rec.name = names[rec.sessionId]
             if rec.dir == nil { rec.dir = dirs[rec.sessionId] }
+            if isIgnoredDir(rec.dir) { continue }   // temp dir / home root: not a real work session
             rec.host = hosts[rec.sessionId]?.host
             rec.ref = hosts[rec.sessionId]?.ref
             out.append(rec)
@@ -92,8 +93,19 @@ enum StateStore {
         return out
     }
 
-    // MARK: - Blocked sessions (ignored entirely, persistently)
+    /// A location that is not real work: the home directory itself, or a system
+    /// temporary folder (the Opentodo app's automatic check-ins run there).
+    /// Child / sub-sessions are filtered in the opencode plugin instead.
+    static func isIgnoredDir(_ dir: String?) -> Bool {
+        guard let d = dir, !d.isEmpty else { return false }
+        if d == FileManager.default.homeDirectoryForCurrentUser.path { return true }
+        for p in ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/"] where d.hasPrefix(p) {
+            return true
+        }
+        return false
+    }
 
+    // MARK: - Blocked sessions (ignored entirely, persistently)
     struct BlockedEntry: Codable {
         var name: String?
         var dir: String?
@@ -202,7 +214,8 @@ enum StateStore {
     @discardableResult
     static func pruneStale(contract: Contract, now: Double) -> Int {
         var removed: [String] = []
-        for rec in readSessions() where rec.ack == true || now - rec.ts > contract.ttl(rec.state) {
+        for rec in readSessions() where rec.ack == true || now - rec.ts > contract.ttl(rec.state)
+            || isIgnoredDir(rec.dir) {
             clearSession(rec.sessionId)
             removed.append(rec.sessionId)
         }

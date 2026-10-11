@@ -92,6 +92,14 @@ def cmd_hook(args):
         if args.verbose:
             print(f"hook: session {early} is blocked, skipping", file=sys.stderr)
         return 0
+    # Sub-sessions / sessions in temporary locations: the plugin tells us to drop
+    # them; make sure any state we already wrote is removed.
+    if str(payload.get("event") or "").lower() == "session.ignore":
+        if early:
+            store.clear(early)
+            if args.verbose:
+                print(f"hook: session {early} ignored (sub-session / temp dir), cleared", file=sys.stderr)
+        return 0
     if str(payload.get("event") or "").lower() == "heartbeat":
         sid = _first(payload, "session_id", "sessionId", "conversation_id", "thread_id", "id")
         if sid:
