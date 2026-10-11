@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Added
+- **opencode v2:TUI(客户端)插件 —— 捕捉「本机正在用的远端服务器会话」**
+  - 服务器插件跑在服务端,远端服务器的会话本地灯看不到;新增 TUI 插件跑在本地终端客户端,能拿到
+    **所连服务器(含远端)的事件流**与本终端**开着的会话**(`ui.tabs` / `ui.router`)
+  - 只上报「**目录不在本机 home 下**(即远端) 且 **本终端开着**」的会话;本地会话仍由服务器插件负责
+    (避免重复)。会话名加前缀(安装时 `AISTATUS_REMOTE_LABEL`,如 `pocket · 会话名`)
+  - 安装到 `~/.config/opencode/plugins/aistatus-tui/{index.ts,tui.ts}`(opencode 自动发现);
+    `install-hooks --agent opencode` 一并安装,`uninstall-hooks` 一并移除
+  - 跳转:远端目录在本机不存在,故不走 `code <目录>`,改为按**窗口标题**匹配(如 `zxLumen-Blog`)
+    聚焦 VS Code —— `AppLauncher` 增加「本地不存在的目录不调用 `code`」的保护
+- **attention 声音**:在 `cli.json` 打开 `attention.sound` / `attention.notifications`
+  (done / question / permission / error / subagent_done)
+
 ### Fixed
 - **opencode v2:菜单/状态灯里会话名全是「opencode」**:v2 只有 `session.created`/`session.renamed`
   会带标题,插件加载前已存在的会话永远拿不到名字,于是回退成 agent 名。现改为:任一会话第一次出现时,

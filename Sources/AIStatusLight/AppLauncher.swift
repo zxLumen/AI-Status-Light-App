@@ -42,8 +42,12 @@ enum AppLauncher {
         if primary == "com.googlecode.iterm2", let r = ref, !r.isEmpty, ITermFocus.focus(sessionRef: r) {
             return true
         }
-        // VS Code: focus the window for this project folder via its CLI.
-        if isVSCode, let d = dir, VSCodeCLI.focus(directory: d) {
+        // VS Code: focus the window for this project folder via its CLI. Only
+        // for a folder that exists locally — a remote session's directory
+        // (e.g. /home/ubuntu/…) has no local window, so fall through to the
+        // accessibility title match below.
+        if isVSCode, let d = dir, FileManager.default.fileExists(atPath: d),
+           VSCodeCLI.focus(directory: d) {
             return true
         }
         // OpenCode desktop: deep link to the project.

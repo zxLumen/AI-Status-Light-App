@@ -141,6 +141,32 @@ def opencode_state(event_type, status, session_id, idle_window=90):
     return None
 
 
+# Raw opencode v2 event names → aistatus state. Used by the local TUI plugin,
+# which forwards the client's *raw* event stream (the server plugin translates
+# to the internal names above instead). Local sessions are reported by the
+# server plugin; the TUI plugin only reports remote-server sessions.
+V2_STATE = {
+    "session.execution.started": "working",
+    "session.execution.succeeded": "success",
+    "session.execution.failed": "error",
+    "session.execution.interrupted": "idle",
+    "session.reasoning.started": "thinking",
+    "session.error": "error",
+    "session.tool.called": "busy",
+    "session.tool.success": "working",
+    "session.tool.failed": "working",
+    "permission.asked": "blocked",
+    "permission.replied": "working",
+    "form.created": "blocked",
+    "form.replied": "working",
+    "form.cancelled": "working",
+}
+
+
+def opencode_state_v2(event_type, session_id, data=None):
+    return V2_STATE.get(str(event_type or ""))
+
+
 def opencode_state_for_payload(event_type, status, session_id, payload):
     """opencode_state() plus a content-based fallback.
 
@@ -187,14 +213,44 @@ def opencode_plugin_legacy_paths():
     return [os.path.expanduser("~/.config/opencode/plugins/aistatus.mjs")]
 
 
-def opencode_plugin_text():
-    here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(here, "opencode_plugin.js"), encoding="utf-8") as f:
-        text = f.read()
+def opencode_tui_plugin_dir():
+    # opencode discovers `<config>/plugins/<name>/{index.ts,tui.ts}` as one plugin.
+    return os.path.expanduser("~/.config/opencode/plugins/aistatus-tui")
+
+
+def opencode_tui_plugin_path():
+    return os.path.join(opencode_tui_plugin_dir(), "tui.ts")
+
+
+def opencode_tui_index_path():
+    return os.path.join(opencode_tui_plugin_dir(), "index.ts")
+
+
+def _subst_template(text):
     return (text
             .replace("__PY__", json.dumps(sys.executable))
             .replace("__AI_STATUS_HOME__", json.dumps(store.home_dir()))
-            .replace("__EVENTS__", json.dumps(OPENCODE_EVENTS)))
+            .replace("__EVENTS__", json.dumps(OPENCODE_EVENTS))
+            .replace("__REMOTE_LABEL__", json.dumps(os.environ.get("AISTATUS_REMOTE_LABEL", "remote")))
+            .replace("__LOCAL_HOME__", json.dumps(os.path.expanduser("~"))))
+
+
+def _template_text(name):
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, name), encoding="utf-8") as f:
+        return f.read()
+
+
+def opencode_plugin_text():
+    return _subst_template(_template_text("opencode_plugin.js"))
+
+
+def opencode_tui_plugin_text():
+    return _subst_template(_template_text("opencode_tui_plugin.ts"))
+
+
+def opencode_tui_index_text():
+    return _subst_template(_template_text("opencode_tui_index.ts"))
 
 
 def _backup(path):
@@ -308,9 +364,14 @@ def hooks_status(agents=None):
 def install_opencode(dry_run=False):
     path = opencode_plugin_path()
     text = opencode_plugin_text()
+    tui_files = ((opencode_tui_index_path(), opencode_tui_index_text()),
+                 (opencode_tui_plugin_path(), opencode_tui_plugin_text()))
     if dry_run:
         print(f"--- would write {path} ---")
         print(text)
+        for p, body in tui_files:
+            print(f"--- would write {p} ---")
+            print(body)
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     for legacy in opencode_plugin_legacy_paths():
@@ -322,7 +383,15 @@ def install_opencode(dry_run=False):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     print(f"wrote {path}")
-    print("note: restart opencode to activate the plugin")
+    # TUI (client) plugin: reports remote-server sessions that this terminal has open.
+    os.makedirs(opencode_tui_plugin_dir(), exist_ok=True)
+    for p, body in tui_files:
+        if os.path.exists(p):
+            shutil.copy2(p, p + ".aistatus.bak")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(body)
+        print(f"wrote {p}")
+    print("note: restart opencode to activate the plugins")
 
 
 def uninstall(dry_run=False):
@@ -360,3 +429,10 @@ def uninstall(dry_run=False):
                 _backup(plug)
                 os.remove(plug)
                 print(f"removed {plug}")
+    tui_dir = opencode_tui_plugin_dir()
+    if os.path.exists(tui_dir):
+        if dry_run:
+            print(f"--- would remove {tui_dir} ---")
+        else:
+            shutil.rmtree(tui_dir, ignore_errors=True)
+            print(f"removed {tui_dir}")

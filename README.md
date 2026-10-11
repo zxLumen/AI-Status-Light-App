@@ -161,10 +161,19 @@ aistatus install-hooks --agent all
 | Claude Code | `~/.claude/settings.json` |
 | Cursor | `~/.cursor/hooks.json` |
 | Codex | `~/.codex/config.toml`(`notify`) |
-| opencode | `~/.config/opencode/plugins/aistatus.js`(插件;装完需重启 opencode) |
+| opencode | 服务器插件 `~/.config/opencode/plugins/aistatus.js` + TUI 插件 `~/.config/opencode/plugins/aistatus-tui/{index,tui}.ts`(装完需重启 opencode) |
 
 > opencode 只自动加载 `{plugin,plugins}/*.{ts,js}` —— 扩展名必须是 `.js`/`.ts`。
 > 装完 opencode 后需**重启**才会生效;日志见 `~/.ai-status-light/opencode.log`。
+>
+> **TUI(客户端)插件**负责「本机连远端服务器」的场景:opencode 插件跑在**服务端**,所以远端会话
+> 本地灯看不到。该插件跑在本地终端客户端里,能拿到**所连服务器**(含远端)的事件流和本终端**开着的
+> 会话**(`ui.tabs`/`ui.router`),只上报「远端 + 本终端打开」的会话,并加前缀(安装时用
+> `AISTATUS_REMOTE_LABEL=pocket` 决定,默认 `remote`)。日志见 `~/.ai-status-light/tui-plugin.log`。
+>
+> 提示音走 opencode 内置 attention:在 `~/.config/opencode/cli.json` 打开
+> `attention.sound` / `attention.notifications`(done/question/permission/error/subagent_done)。
+
 
 ## 灯效映射
 

@@ -47,6 +47,10 @@ def _resolve(args, payload):
         elif "start" in t or "begin" in t:
             state = "working"
 
+    if not state and str(agent) == "opencode" and payload.get("v2raw"):
+        # Raw opencode v2 event from the local TUI plugin.
+        state = integrations.opencode_state_v2(event, session, payload.get("properties"))
+
     if not state and str(agent) == "opencode":
         props = payload.get("properties") or {}
         status = (_first(payload, "status", "session_status")
