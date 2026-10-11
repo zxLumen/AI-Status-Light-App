@@ -8,6 +8,7 @@ const PY = __PY__;
 const AI_STATUS_HOME = __AI_STATUS_HOME__;
 const ALLOWED = __EVENTS__;
 const LOG = path.join(AI_STATUS_HOME, "opencode.log");
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
 const BLOCKED = path.join(AI_STATUS_HOME, "blocked.json");
 let blockedCache = { at: 0, set: new Set() };
 
@@ -25,17 +26,38 @@ function isBlocked(sid) {
   return blockedCache.set.has(sid);
 }
 
-const lastTitle = new Map();
-const lastDir = new Map();
-const lastQuestion = new Map();   // part id -> last status we forwarded
-const lastThinking = new Map();   // part id -> already reported thinking
-const pendingQuestion = new Set(); // sessions currently blocked on a question
-const pendingPermission = new Set(); // sessions waiting on a permission prompt
-const inflight = new Map();        // sessionID -> running tool count
-const heartbeats = new Map();      // sessionID -> interval id
-const metaFetched = new Set();     // sessionID -> already fetched name/dir via ctx.session.get
-const busyAt = new Map();          // sessionID -> last "busy" forward (dedupe hook vs event)
-const workAt = new Map();          // sessionID -> last "working" forward
+// opencode loads the plugin once per location, so several instances of this
+// module can live in one process, each subscribing to the *global* event stream.
+// Without sharing, every event fires once per instance (and spawns a hook
+// process each time). Route all mutable state through globalThis and dedupe the
+// stream by event id, so the instances behave like one plugin.
+const G = globalThis;
+const lastTitle = (G.__aistatusLastTitle ??= new Map());
+const lastDir = (G.__aistatusLastDir ??= new Map());
+const lastQuestion = (G.__aistatusLastQuestion ??= new Map());   // part id -> last status we forwarded
+const lastThinking = (G.__aistatusLastThinking ??= new Map());   // part id -> already reported thinking
+const pendingQuestion = (G.__aistatusPendingQuestion ??= new Set()); // sessions currently blocked on a question
+const pendingPermission = (G.__aistatusPendingPermission ??= new Set()); // sessions waiting on a permission prompt
+const inflight = (G.__aistatusInflight ??= new Map());        // sessionID -> running tool count
+const heartbeats = (G.__aistatusHeartbeats ??= new Map());    // sessionID -> interval id
+const metaFetched = (G.__aistatusMetaFetched ??= new Set());  // sessionID -> fetched name/dir via ctx.session.get
+const busyAt = (G.__aistatusBusyAt ??= new Map());            // sessionID -> last "busy" forward (dedupe hook vs event)
+const workAt = (G.__aistatusWorkAt ??= new Map());            // sessionID -> last "working" forward
+const seenEvents = (G.__aistatusSeenEvents ??= new Map());    // event id -> first-seen ts
+
+// Claim an event id so only one plugin instance in the process acts on it.
+const SEEN_TTL_MS = 60000;
+function firstSeen(id) {
+  if (!id) return true;
+  const now = Date.now();
+  if (seenEvents.size > 1024) {
+    for (const [k, t] of seenEvents) { if (now - t > SEEN_TTL_MS) seenEvents.delete(k); }
+    if (seenEvents.size > 8192) seenEvents.clear();
+  }
+  if (seenEvents.has(id)) return false;
+  seenEvents.set(id, now);
+  return true;
+}
 
 // opencode v2 emits both a tool hook (execute.before/after) and a public
 // `session.tool.called/success` event for the same call. Only the first source
@@ -120,6 +142,10 @@ const HOST_REF = process.env.ITERM_SESSION_ID || process.env.TERM_SESSION_ID || 
 function log(line) {
   try {
     fs.mkdirSync(AI_STATUS_HOME, { recursive: true });
+    // Rotate so the log can never grow unbounded.
+    try {
+      if (fs.statSync(LOG).size > LOG_MAX_BYTES) fs.renameSync(LOG, LOG + ".1");
+    } catch (e) { /* no log yet */ }
     fs.appendFileSync(LOG, new Date().toISOString() + "  " + line + "\n");
   } catch (e) {}
 }
@@ -444,18 +470,17 @@ export default {
         for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
           const raw = ev?.type;
           const d = ev?.data ?? {};
-          // Tool activity is visible as a public event too; forward it directly
-          // (it is not part of the ALLOWED set handled below).
-          if (raw === "session.tool.called") {
-            await onToolBefore({ sessionID: d.sessionID, tool: d.tool ?? d.name });
+          const isToolEvent = raw === "session.tool.called" || raw === "session.tool.success"
+                           || raw === "session.tool.failed";
+          const mapped = isToolEvent ? null : fromV2(ev);
+          if (!isToolEvent && !mapped) continue;    // ignore the high-frequency deltas
+          if (!firstSeen(ev?.id)) continue;         // one instance acts per event
+          if (isToolEvent) {
+            const input = { sessionID: d.sessionID, tool: d.tool ?? d.name };
+            if (raw === "session.tool.called") await onToolBefore(input);
+            else await onToolAfter(input);
             continue;
           }
-          if (raw === "session.tool.success" || raw === "session.tool.failed") {
-            await onToolAfter({ sessionID: d.sessionID, tool: d.tool ?? d.name });
-            continue;
-          }
-          const mapped = fromV2(ev);
-          if (!mapped) continue;
           // The envelope carries `location.directory` on every event, so the
           // directory is also available one level up from `data`.
           const envDir = ev?.location?.directory;

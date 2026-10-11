@@ -216,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         trackInterrupts(records)
         pollTick &+= 1
         if pollTick % 4 == 0 { acknowledgeFocused() }
+        if pollTick % 120 == 0 { StateStore.sweepOrphanLocks() }   // ~once a minute
         let transitions = stateTransitions()
         maybeBubble(transitions)
         maybePush(transitions)
@@ -542,6 +543,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dir = StateStore.home
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("app.log")
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, size > 5 * 1024 * 1024 {
+            let rotated = dir.appendingPathComponent("app.log.1")
+            try? FileManager.default.removeItem(at: rotated)
+            try? FileManager.default.moveItem(at: url, to: rotated)
+        }
         let line = ISO8601DateFormatter().string(from: Date()) + "  pid=\(getpid())  " + text + "\n"
         guard let data = line.data(using: .utf8) else { return }
         if let h = try? FileHandle(forWritingTo: url) {

@@ -166,6 +166,23 @@ enum StateStore {
         try? FileManager.default.removeItem(atPath: url.path + ".lock")
     }
 
+    /// Remove `*.json.lock` files whose session json no longer exists (a hook
+    /// creates a lock per write, and pruning the session elsewhere can leave the
+    /// lock behind). Only touches locks idle for a while so an in-flight write
+    /// is never disturbed.
+    static func sweepOrphanLocks(minIdle: Double = 600) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil) else { return }
+        let now = Date().timeIntervalSince1970
+        for url in items where url.lastPathComponent.hasSuffix(".json.lock") {
+            let json = url.deletingPathExtension()          // foo.json.lock -> foo.json
+            if fm.fileExists(atPath: json.path) { continue }
+            let mtime = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+            if let mtime, now - mtime.timeIntervalSince1970 < minIdle { continue }
+            try? fm.removeItem(at: url)
+        }
+    }
+
     /// Drop entries for removed sessions from the name / dir / host side-tables,
     /// so those don't grow forever either.
     private static func forget(_ ids: [String]) {

@@ -17,6 +17,15 @@
 - opencode v2 另有公开的 `session.tool.called/success/failed` 事件;现也直接映射为 busy/working,
   与 hook 通道在 800ms 内去重,作为 hook 缺失(按项目/location 作用域)时的兜底
 
+### Changed
+- **opencode v2:同一事件不再重复转发**:opencode 按 location 加载插件,同一进程内会有多份实例订阅**全局**事件流,
+  之前每个事件会触发 N 次转发(每次起一个 hook 子进程)。现把全部可变状态改为 `globalThis` 共享,
+  并按事件 `id` 去重,多实例表现为"一个插件";实测同一事件由 5× 降到 1×
+- **日志自动轮转**:`opencode.log` > 5MB 自动轮转为 `.1`(插件侧);`app.log` > 5MB 轮转为 `.1`(App 侧);
+  一次性清掉了已累积的 ~46MB 旧日志
+- **清理孤儿 `.lock`**:会话写锁 `*.json.lock` 在会话被清理后会残留;App 每约 60s 扫描删除
+  对应 `.json` 已不存在、且闲置 >10 分钟的锁文件(实测 156 → 3)
+
 ### Added
 - README 增加**完整演示 GIF**(`docs/images/demo-full.gif`,640×416、10fps、4× 加速、约 4.8MB),
   走查:VS Code/opencode 跑任务 → 菜单栏灯与悬浮红绿灯 → 会话列表/会话管理/悬浮灯/手机推送
