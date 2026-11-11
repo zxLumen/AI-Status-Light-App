@@ -1,3 +1,7 @@
+© 2026 刘子祥 · 原创作品，转载请注明出处
+
+> **定位**：AI Status Light 的 macOS 菜单栏版：用菜单栏红绿灯实时映射 AI 编程 agent 的运行状态。 使用许可见 [LICENSE](./LICENSE)。
+
 # AI Status Light
 
 <img src="https://github.com/zxLumen/AI-Status-Light-App/releases/download/assets/icon-1024.png" width="120" align="right" alt="App 图标">
